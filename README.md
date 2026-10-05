@@ -99,6 +99,3 @@ npx tsc --noEmit        # TypeScript typecheck
 ```
 
 ---
-
-## 📜 License
-MIT
