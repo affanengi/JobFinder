@@ -32,6 +32,14 @@ class ApplicationRepository:
         results: list[ApplicationRecordDTO] = []
         try:
             client = get_firestore_client()
+            if not client:
+                results = [
+                    rec for rec in self._memory_cache.values()
+                    if rec.userId == user_id and (status is None or rec.status == status)
+                ]
+                results.sort(key=lambda x: x.updatedAt or x.createdAt, reverse=True)
+                return results
+
             query = client.collection(self.COLLECTION).where("userId", "==", user_id)
             if status:
                 query = query.where("status", "==", status.value if hasattr(status, "value") else str(status))
@@ -66,16 +74,17 @@ class ApplicationRepository:
 
         try:
             client = get_firestore_client()
-            doc_ref = client.collection(self.COLLECTION).document(app_id)
-            snapshot = doc_ref.get()
-            if snapshot.exists:
-                data = snapshot.to_dict() or {}
-                if data.get("userId") != user_id:
-                    logger.warning(f"Unauthorized access attempt to application {app_id} by user {user_id}")
-                    return None
-                record = ApplicationRecordDTO.model_validate(data)
-                self._memory_cache[record.id] = record
-                return record
+            if client:
+                doc_ref = client.collection(self.COLLECTION).document(app_id)
+                snapshot = doc_ref.get()
+                if snapshot.exists:
+                    data = snapshot.to_dict() or {}
+                    if data.get("userId") != user_id:
+                        logger.warning(f"Unauthorized access attempt to application {app_id} by user {user_id}")
+                        return None
+                    record = ApplicationRecordDTO.model_validate(data)
+                    self._memory_cache[record.id] = record
+                    return record
         except Exception as e:
             logger.error(f"Error retrieving application {app_id} for user {user_id}: {e}")
 
@@ -89,18 +98,19 @@ class ApplicationRepository:
 
         try:
             client = get_firestore_client()
-            docs = (
-                client.collection(self.COLLECTION)
-                .where("userId", "==", user_id)
-                .where("jobId", "==", job_id)
-                .limit(1)
-                .stream()
-            )
-            for doc in docs:
-                data = doc.to_dict() or {}
-                record = ApplicationRecordDTO.model_validate(data)
-                self._memory_cache[record.id] = record
-                return record
+            if client:
+                docs = (
+                    client.collection(self.COLLECTION)
+                    .where("userId", "==", user_id)
+                    .where("jobId", "==", job_id)
+                    .limit(1)
+                    .stream()
+                )
+                for doc in docs:
+                    data = doc.to_dict() or {}
+                    record = ApplicationRecordDTO.model_validate(data)
+                    self._memory_cache[record.id] = record
+                    return record
         except Exception as e:
             logger.error(f"Error finding application for job {job_id} (user {user_id}): {e}")
 
@@ -113,8 +123,9 @@ class ApplicationRepository:
 
         try:
             client = get_firestore_client()
-            client.collection(self.COLLECTION).document(record.id).set(record.model_dump())
-            logger.info(f"Persisted application {record.id} (status: {record.status}) for user {record.userId}")
+            if client:
+                client.collection(self.COLLECTION).document(record.id).set(record.model_dump())
+                logger.info(f"Persisted application {record.id} (status: {record.status}) for user {record.userId}")
         except Exception as e:
             logger.error(f"Failed to persist application {record.id} to Firestore: {e}")
 

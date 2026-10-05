@@ -13,27 +13,35 @@ class ProfileRepository:
 
     COLLECTION = "profiles"
 
+    def __init__(self):
+        self._memory_cache: dict[str, Profile] = {}
+
     def get_by_user_id(self, user_id: str) -> Profile | None:
-        """Fetch user profile from Firestore."""
+        """Fetch user profile from Firestore or memory cache."""
         try:
             client = get_firestore_client()
-            doc_ref = client.collection(self.COLLECTION).document(user_id)
-            doc = doc_ref.get()
-            if doc.exists:
-                data = doc.to_dict() or {}
-                return Profile.model_validate(data)
+            if client:
+                doc_ref = client.collection(self.COLLECTION).document(user_id)
+                doc = doc_ref.get()
+                if doc.exists:
+                    data = doc.to_dict() or {}
+                    profile = Profile.model_validate(data)
+                    self._memory_cache[user_id] = profile
+                    return profile
         except Exception as e:
             logger.error(f"Error fetching profile for user {user_id} from Firestore: {e}")
-        return None
+        return self._memory_cache.get(user_id)
 
     def save(self, profile: Profile) -> Profile:
-        """Save or update user profile in Firestore."""
+        """Save or update user profile in Firestore and in-memory cache."""
+        self._memory_cache[profile.userId] = profile
         try:
             client = get_firestore_client()
-            doc_ref = client.collection(self.COLLECTION).document(profile.userId)
-            data = profile.model_dump(mode="json")
-            doc_ref.set(data)
-            logger.info(f"Persisted profile for user {profile.userId} to Firestore.")
+            if client:
+                doc_ref = client.collection(self.COLLECTION).document(profile.userId)
+                data = profile.model_dump(mode="json")
+                doc_ref.set(data)
+                logger.info(f"Persisted profile for user {profile.userId} to Firestore.")
         except Exception as e:
             logger.error(f"Error saving profile for user {profile.userId} to Firestore: {e}")
         return profile

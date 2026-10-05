@@ -442,10 +442,9 @@ class ProfileService:
         if user_id in self._profiles:
             return self._profiles[user_id]
 
-        # 3. If user_id is user_default, initialize default
-        if user_id == "user_default":
-            self._init_default_profile()
-            return self._profiles["user_default"]
+        # 3. If user_id is user_default or the primary developer user ID, initialize default profile
+        if user_id in ("user_default", "Sf0isG4mUuXwTQTWWwG1Wf4aIM82"):
+            return self._init_default_profile(user_id=user_id)
 
         # 4. Create new user profile for multi-user system with clean blank facts (no hardcoded fallbacks)
         new_profile = Profile(
