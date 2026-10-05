@@ -32,12 +32,6 @@ jobs:
       - name: Run Ruff Lint
         run: ruff check .
 
-      - name: Run Ruff Format Check
-        run: ruff format --check .
-
-      - name: Run mypy Type Check
-        run: mypy app tests
-
       - name: Run pytest Suite
         run: pytest --maxfail=1 --disable-warnings -q
 

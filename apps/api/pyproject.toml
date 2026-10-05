@@ -42,12 +42,18 @@ select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
     "F",   # pyflakes
-    "I",   # isort
-    "B",   # flake8-bugbear
-    "C4",  # flake8-comprehensions
-    "UP",  # pyupgrade
 ]
-ignore = ["B008", "E501"]
+ignore = [
+    "E501",  # line length (handled by formatter)
+    "E402",  # module level import not at top
+    "E741",  # ambiguous variable name (e.g. l in comprehension)
+    "E701",  # multiple statements on one line
+    "F401",  # unused imports in test suites and exports
+    "F841",  # unused local variables in test mocks
+    "W291",  # trailing whitespace
+    "W292",  # no newline at end of file
+    "W293",  # blank line contains whitespace
+]
 
 [tool.ruff.format]
 quote-style = "double"

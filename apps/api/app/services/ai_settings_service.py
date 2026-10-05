@@ -671,7 +671,7 @@ class AISettingsService:
                     api_key=decrypted_key,
                 )
                 success = True
-                msg = f"Connection probe succeeded."
+                msg = "Connection probe succeeded."
                 health_status = CredentialHealth.HEALTHY
                 ai_orchestrator.health_registry.set_credential_health(
                     user_id=user_id,
