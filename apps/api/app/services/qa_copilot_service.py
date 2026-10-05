@@ -363,7 +363,7 @@ class QACopilotService:
             elif q.questionId in generative_results:
                 final_answers.append(generative_results[q.questionId])
 
-        model_name = getattr(self.ai, "last_model_used", None) or settings.GEMINI_MODEL
+        model_name = (getattr(self._ai, "last_model_used", None) or settings.GEMINI_MODEL) if self._ai else settings.GEMINI_MODEL
 
         if app_record:
             for ans in final_answers:
