@@ -10,6 +10,7 @@ import { ScannerPage } from './pages/ScannerPage';
 import { MemoryPage } from './pages/MemoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { RecentActivitiesPage } from './pages/RecentActivitiesPage';
 import { ResumeStudioModal, TailoredResumeDTO } from './components/resume/ResumeStudioModal';
 import { fetchWithAuth } from './lib/api';
 
@@ -21,6 +22,7 @@ const VALID_TABS = [
   'scanner',
   'applications',
   'memory',
+  'ai-activity',
   'settings',
 ] as const;
 
@@ -152,6 +154,8 @@ export const AppContent: React.FC = () => {
         return { title: 'Applications', subtitle: 'Track submitted & in-flight applications' };
       case 'memory':
         return { title: 'Memory Layer', subtitle: 'Learned preferences & interaction history' };
+      case 'ai-activity':
+        return { title: 'Recent AI Activities', subtitle: 'Audit log of model invocations, routing decisions, and fallback traces' };
       case 'settings':
         return { title: 'Settings', subtitle: 'Job discovery parameters & hard filters' };
       default:
@@ -192,6 +196,8 @@ export const AppContent: React.FC = () => {
         return <ApplicationsPage />;
       case 'memory':
         return <MemoryPage />;
+      case 'ai-activity':
+        return <RecentActivitiesPage />;
       case 'settings':
         return <SettingsPage />;
       default:

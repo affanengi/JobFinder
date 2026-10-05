@@ -186,6 +186,10 @@ class AIOrchestrator:
         hops: list[dict[str, Any]],
         cost_tier: str = "FREE",
         failure_category: str | None = None,
+        operation_id: str | None = None,
+        preferred_credential_id: str | None = None,
+        preferred_route_skipped: bool = False,
+        preferred_route_skip_reason: str | None = None,
     ) -> None:
         """Safely persist execution telemetry without leaking secrets or failing caller."""
         try:
@@ -214,6 +218,7 @@ class AIOrchestrator:
                 record={
                     "executionId": exec_id,
                     "userId": user_id,
+                    "operationId": operation_id,
                     "task": task_val,
                     "providerUsed": candidate_provider,
                     "modelUsed": candidate_model,
@@ -224,6 +229,10 @@ class AIOrchestrator:
                     "hopsCount": hops_count,
                     "failureCategory": failure_category,
                     "costTier": cost_tier,
+                    "preferredCredentialId": preferred_credential_id,
+                    "preferredRouteSkipped": preferred_route_skipped,
+                    "preferredRouteSkipReason": preferred_route_skip_reason,
+                    "attemptedHops": hops,
                     "timestamp": now_iso,
                 },
             )
@@ -287,6 +296,25 @@ class AIOrchestrator:
                 f"No healthy candidates available to service task {request.task.value} under active cost policy.",
                 details={"task": request.task.value, "user_id": request.user_id},
             )
+
+        # Resolve preferred credential for task (for observability and skip-reason tracking)
+        task_key = request.task.value if hasattr(request.task, "value") else str(request.task)
+        aliases = [task_key, str(request.task)]
+        if task_key == "resume_tailoring":
+            aliases.append("resume_generation")
+        elif task_key == "resume_generation":
+            aliases.append("resume_tailoring")
+        elif task_key == "cover_letter_gen":
+            aliases.append("cover_letter_generation")
+        elif task_key == "cover_letter_generation":
+            aliases.append("cover_letter_gen")
+
+        preferred_cred_id: str | None = None
+        if user_profile and user_profile.task_routing:
+            for k in aliases:
+                if k in user_profile.task_routing:
+                    preferred_cred_id = user_profile.task_routing[k]
+                    break
 
         # Set of credentials pruned during this execution run (e.g. invalid key)
         pruned_credentials: set[str] = set()
@@ -354,6 +382,19 @@ class AIOrchestrator:
                     f"[AI_SUCCESS] Completed request using {candidate.provider.value}:{candidate.model_id} via {candidate.credential_id}"
                 )
 
+                pref_skipped = False
+                pref_skip_reason = None
+                if preferred_cred_id and candidate.credential_id != preferred_cred_id:
+                    pref_skipped = True
+                    if preferred_cred_id in unhealthy_creds:
+                        pref_skip_reason = "UNHEALTHY"
+                    elif any(h.get("credential_id") == preferred_cred_id for h in attempted_hops):
+                        pref_skip_reason = "RATE_LIMITED_OR_FAILED"
+                    elif (request.user_id, preferred_cred_id) in user_cooldowns:
+                        pref_skip_reason = "COOLDOWN"
+                    else:
+                        pref_skip_reason = "FALLBACK_TO_SIBLING"
+
                 self._safe_record_telemetry(
                     user_id=request.user_id,
                     task=request.task,
@@ -367,6 +408,10 @@ class AIOrchestrator:
                     if hasattr(candidate.cost_tier, "value")
                     else str(candidate.cost_tier),
                     failure_category=None,
+                    operation_id=request.operation_id,
+                    preferred_credential_id=preferred_cred_id,
+                    preferred_route_skipped=pref_skipped,
+                    preferred_route_skip_reason=pref_skip_reason,
                 )
 
                 return ExecutionResponse(
@@ -399,6 +444,10 @@ class AIOrchestrator:
                         if hasattr(candidate.cost_tier, "value")
                         else str(candidate.cost_tier),
                         failure_category="AIOutputValidationError",
+                        operation_id=request.operation_id,
+                        preferred_credential_id=preferred_cred_id,
+                        preferred_route_skipped=bool(preferred_cred_id and candidate.credential_id != preferred_cred_id),
+                        preferred_route_skip_reason="SCHEMA_VALIDATION_ERROR",
                     )
                     raise raw_e
 
@@ -440,12 +489,14 @@ class AIOrchestrator:
                         if hasattr(candidate.cost_tier, "value")
                         else str(candidate.cost_tier),
                         failure_category="AISafetyError",
+                        operation_id=request.operation_id,
+                        preferred_credential_id=preferred_cred_id,
+                        preferred_route_skipped=bool(preferred_cred_id and candidate.credential_id != preferred_cred_id),
+                        preferred_route_skip_reason="SAFETY_REFUSAL",
                     )
                     raise classified_err from raw_e
 
                 # Fatal credential error: Authentication failure (401)
-                # When authentication fails, the credential itself is invalid.
-                # Mark credential as INVALID_KEY and abort immediately to avoid pointless hopping.
                 if isinstance(classified_err, (AIAuthenticationError, AIConfigurationError)):
                     self.health_registry.set_credential_health(
                         user_id=request.user_id,
@@ -472,24 +523,33 @@ class AIOrchestrator:
                         if hasattr(candidate.cost_tier, "value")
                         else str(candidate.cost_tier),
                         failure_category=classified_err.__class__.__name__,
+                        operation_id=request.operation_id,
+                        preferred_credential_id=preferred_cred_id,
+                        preferred_route_skipped=bool(preferred_cred_id and candidate.credential_id != preferred_cred_id),
+                        preferred_route_skip_reason="INVALID_OR_UNCONFIGURED_KEY",
                     )
                     raise classified_err from raw_e
 
-                # Rate Limit (429) & Quota Exhaustion
-                # Put model into temporary cooldown for this (user, credential, model)
+                # Rate Limit (429) & Quota Exhaustion Handling
+                retry_duration = getattr(classified_err, "retry_after", None) or 60.0
                 self.health_registry.set_model_cooldown(
                     user_id=request.user_id,
                     credential_id=candidate.credential_id,
                     model_id=candidate.model_id,
-                    duration_seconds=60.0,
+                    duration_seconds=retry_duration,
                 )
 
-                # If candidate has a verified or user-declared project scope, track it for quota exhaustion
-                if candidate.project_scope and (
-                    candidate.project_scope.verified
-                    or candidate.project_scope.scope_type.value == "USER_DECLARED_PROJECT"
-                ):
-                    exhausted_scope_ids.add(candidate.project_scope.scope_id)
+                # ONLY prune the entire project scope if project quota exhaustion is confirmed by structured classifier!
+                # Transient per-minute rate limits must NOT poison the project scope, allowing adjacent models to be attempted.
+                if getattr(classified_err, "is_project_quota_exhausted", False):
+                    if candidate.project_scope and (
+                        candidate.project_scope.verified
+                        or candidate.project_scope.scope_type.value == "USER_DECLARED_PROJECT"
+                    ):
+                        exhausted_scope_ids.add(candidate.project_scope.scope_id)
+                        logger.warning(
+                            f"[QUOTA_SCOPE_EXHAUSTED] Confirmed project quota exhausted for scope {candidate.project_scope.scope_id}. Pruning scope."
+                        )
 
                 logger.warning(
                     f"[AI_INSTANT_FALLBACK] {candidate.provider.value}:{candidate.model_id} on {candidate.credential_id} encountered {classified_err.__class__.__name__} "
@@ -513,6 +573,10 @@ class AIOrchestrator:
             failure_category=last_error.__class__.__name__
             if last_error
             else "AIProviderUnavailableError",
+            operation_id=request.operation_id,
+            preferred_credential_id=preferred_cred_id,
+            preferred_route_skipped=bool(preferred_cred_id),
+            preferred_route_skip_reason="ALL_CANDIDATES_FAILED",
         )
         safe_last_err = sanitize_text(str(last_error))
         raise AIProviderUnavailableError(

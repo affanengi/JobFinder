@@ -83,6 +83,7 @@ class ExecutionTelemetryDTO(BaseModel):
 
     executionId: str
     userId: str
+    operationId: str | None = None
     task: AITaskType
     providerUsed: ProviderType
     modelUsed: str
@@ -93,6 +94,10 @@ class ExecutionTelemetryDTO(BaseModel):
     hopsCount: int = 1
     failureCategory: str | None = None
     costTier: CostTier = CostTier.FREE
+    preferredCredentialId: str | None = None
+    preferredRouteSkipped: bool = False
+    preferredRouteSkipReason: str | None = None
+    attemptedHops: list[dict] = Field(default_factory=list)
     timestamp: str
 
 
@@ -114,4 +119,14 @@ class TelemetryResponse(BaseModel):
 
     summary: TelemetrySummaryDTO
     recentExecutions: list[ExecutionTelemetryDTO]
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+
+class PaginatedTelemetryResponse(BaseModel):
+    """Paginated execution telemetry payload."""
+
+    items: list[ExecutionTelemetryDTO]
+    nextCursor: str | None = None
+    hasMore: bool = False
+    totalCount: int | None = None
     timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())

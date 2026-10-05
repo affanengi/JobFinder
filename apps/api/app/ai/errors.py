@@ -32,6 +32,21 @@ class AITransientError(AIProviderError):
 class AIRateLimitError(AITransientError):
     """HTTP 429 / Resource exhausted / Quota exceeded."""
 
+    def __init__(
+        self,
+        message: str,
+        model: str | None = None,
+        status_code: int | None = 429,
+        details: dict[str, Any] | None = None,
+        is_project_quota_exhausted: bool = False,
+        retry_after: float | None = None,
+        quota_metric: str | None = None,
+    ):
+        super().__init__(message, model=model, status_code=status_code, details=details)
+        self.is_project_quota_exhausted = is_project_quota_exhausted
+        self.retry_after = retry_after
+        self.quota_metric = quota_metric
+
 
 class AIServiceUnavailableError(AITransientError):
     """HTTP 503 / Service unavailable / High demand spike."""

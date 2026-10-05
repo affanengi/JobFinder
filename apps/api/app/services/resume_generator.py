@@ -364,6 +364,7 @@ class ResumeGeneratorService:
         job: CanonicalJob,
         profile: Profile,
         custom_instructions: str | None = None,
+        operation_id: str | None = None,
     ) -> TailoredResumeDTO:
         """Generate tailored StructuredResumeContent and validate deterministically."""
         from app.services.job_analysis_service import job_analysis_service
@@ -471,6 +472,7 @@ Return strictly structured JSON conforming to the StructuredResumeContent schema
             temperature=0.2,
             task=AITaskType.RESUME_TAILORING,
             user_id=profile.userId,
+            operation_id=operation_id,
         )
 
         # Authoritative grounding: Always stamp candidate verified contact credentials from master profile
@@ -510,6 +512,7 @@ Return strictly structured JSON conforming to the StructuredResumeContent schema
                     temperature=0.0,
                     task=AITaskType.RESUME_TAILORING,
                     user_id=profile.userId,
+                    operation_id=operation_id,
                 )
                 structured.personal = ResumeContact(
                     fullName=profile.personal.fullName or "Mohammed Affan Razvi",
@@ -555,6 +558,7 @@ Return strictly structured JSON conforming to the StructuredResumeContent schema
         profile: Profile,
         tone: CoverLetterTone = "professional",
         custom_instructions: str | None = None,
+        operation_id: str | None = None,
     ) -> TailoredCoverLetterDTO:
         """Generate tailored CoverLetterContent and validate deterministically."""
         from app.services.job_analysis_service import job_analysis_service
@@ -616,6 +620,7 @@ Return strictly structured JSON conforming to the CoverLetterContent schema."""
             temperature=0.3,
             task=AITaskType.COVER_LETTER_GEN,
             user_id=profile.userId,
+            operation_id=operation_id,
         )
 
         structured.fullName = profile.personal.fullName or "Mohammed Affan Razvi"
@@ -645,6 +650,7 @@ Return strictly structured JSON conforming to the CoverLetterContent schema."""
                     temperature=0.0,
                     task=AITaskType.COVER_LETTER_GEN,
                     user_id=profile.userId,
+                    operation_id=operation_id,
                 )
                 validation_result = cover_letter_validator.validate(structured, profile)
             except Exception as e:
@@ -678,6 +684,7 @@ Return strictly structured JSON conforming to the CoverLetterContent schema."""
         cover_letter_tone: CoverLetterTone = "professional",
         custom_instructions: str | None = None,
         force_regenerate: bool = False,
+        operation_id: str | None = None,
     ) -> GenerateArtifactsResponse:
         """Generate resume, cover letter, or both with caching adherence (0 Gemini calls when cached)."""
         existing_resume = resume_repo.get_resume_for_job(user_id=profile.userId, job_id=job.id)
@@ -703,6 +710,7 @@ Return strictly structured JSON conforming to the CoverLetterContent schema."""
                 job=job,
                 profile=profile,
                 custom_instructions=custom_instructions,
+                operation_id=operation_id,
             )
 
         if mode in ("cover_letter", "both"):
@@ -711,6 +719,7 @@ Return strictly structured JSON conforming to the CoverLetterContent schema."""
                 profile=profile,
                 tone=tone or cover_letter_tone,
                 custom_instructions=custom_instructions,
+                operation_id=operation_id,
             )
 
         return GenerateArtifactsResponse(

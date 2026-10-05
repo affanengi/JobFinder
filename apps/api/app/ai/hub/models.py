@@ -188,6 +188,7 @@ class ExecutionRequest(BaseModel):
     schema_cls: Any | None = None
     temperature: float = 0.7
     execution_timeout: float = 30.0
+    operation_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

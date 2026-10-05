@@ -366,10 +366,30 @@ class OpenRouterAdapter(BaseProviderAdapter):
             or "quota" in err_str
             or "too many requests" in err_str
         ):
+            is_proj = False
+            ra_val: float | None = None
+            if isinstance(error, httpx.HTTPStatusError):
+                ra_header = error.response.headers.get("retry-after")
+                if ra_header:
+                    try:
+                        ra_val = float(ra_header)
+                    except (ValueError, TypeError):
+                        pass
+                try:
+                    data = error.response.json()
+                    if isinstance(data, dict):
+                        err_obj = data.get("error", {})
+                        if isinstance(err_obj, dict) and err_obj.get("code") in (402, "insufficient_quota"):
+                            is_proj = True
+                except Exception:
+                    pass
+
             return AIRateLimitError(
                 f"OpenRouter rate limit / quota exceeded for model {model}: {safe_msg}",
                 model=model,
                 status_code=429,
+                is_project_quota_exhausted=is_proj,
+                retry_after=ra_val,
             )
 
         if status_code == 400 or "400" in err_str or "bad request" in err_str:

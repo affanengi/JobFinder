@@ -17,6 +17,7 @@ from app.schemas.ai_settings import (
 from app.schemas.ai_telemetry import (
     AIHealthResponse,
     ModelCatalogItemDTO,
+    PaginatedTelemetryResponse,
     ProbeRequest,
     ProbeResponse,
     TelemetryResponse,
@@ -182,3 +183,25 @@ async def get_telemetry(
     user_id: str = Depends(get_authenticated_user_id),
 ) -> TelemetryResponse:
     return ai_settings_service.get_telemetry_summary(user_id, limit=min(limit, 100))
+
+
+@router.get(
+    "/telemetry/history",
+    response_model=PaginatedTelemetryResponse,
+    summary="Get paginated user AI execution history",
+    description="Retrieve paginated execution telemetry for the authenticated user using cursor-based pagination.",
+)
+async def get_telemetry_history(
+    limit: int = 20,
+    cursor: str | None = None,
+    task: str | None = None,
+    provider: str | None = None,
+    user_id: str = Depends(get_authenticated_user_id),
+) -> PaginatedTelemetryResponse:
+    return ai_settings_service.get_telemetry_history_paginated(
+        user_id=user_id,
+        limit=min(limit, 100),
+        cursor=cursor,
+        task=task,
+        provider=provider,
+    )

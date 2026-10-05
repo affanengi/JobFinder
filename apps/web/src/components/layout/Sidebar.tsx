@@ -8,7 +8,8 @@ import {
   LayoutDashboard,
   ShieldCheck,
   UserCheck,
-  Gauge
+  Gauge,
+  Activity,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -33,6 +34,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'scanner', label: 'ATS Scanner', icon: Gauge },
     { id: 'applications', label: 'Applications', icon: Send },
     { id: 'memory', label: 'Memory & Facts', icon: BrainCircuit },
+    { id: 'ai-activity', label: 'Recent AI Activities', icon: Activity },
     { id: 'settings', label: 'Preferences & Filters', icon: Settings },
   ];
 

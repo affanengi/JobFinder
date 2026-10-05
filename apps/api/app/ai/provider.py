@@ -17,6 +17,7 @@ class AIProvider(Protocol):
         temperature: float = 0.2,
         task: Any = None,
         user_id: str | None = None,
+        operation_id: str | None = None,
     ) -> str:
         """Generate unstructured text from a prompt."""
         ...
@@ -29,6 +30,7 @@ class AIProvider(Protocol):
         temperature: float = 0.1,
         task: Any = None,
         user_id: str | None = None,
+        operation_id: str | None = None,
     ) -> T:
         """Generate validated, structured JSON adhering to a Pydantic schema."""
         ...

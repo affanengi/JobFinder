@@ -54,6 +54,7 @@ from app.schemas.ai_telemetry import (
     AIHealthResponse,
     ExecutionTelemetryDTO,
     ModelCatalogItemDTO,
+    PaginatedTelemetryResponse,
     ProbeRequest,
     ProbeResponse,
     ProviderHealthDTO,
@@ -868,6 +869,7 @@ class AISettingsService:
                     ExecutionTelemetryDTO(
                         executionId=str(r.get("executionId", "")),
                         userId=user_id,
+                        operationId=r.get("operationId"),
                         task=task_enum,
                         providerUsed=provider_enum,
                         modelUsed=str(r.get("modelUsed", "")),
@@ -878,6 +880,10 @@ class AISettingsService:
                         hopsCount=int(r.get("hopsCount", 1)),
                         failureCategory=r.get("failureCategory"),
                         costTier=cost_enum,
+                        preferredCredentialId=r.get("preferredCredentialId"),
+                        preferredRouteSkipped=bool(r.get("preferredRouteSkipped", False)),
+                        preferredRouteSkipReason=r.get("preferredRouteSkipReason"),
+                        attemptedHops=r.get("attemptedHops", []),
                         timestamp=str(r.get("timestamp", "")),
                     )
                 )
@@ -887,6 +893,76 @@ class AISettingsService:
         return TelemetryResponse(
             summary=summary,
             recentExecutions=recent,
+            timestamp=datetime.now(UTC).isoformat(),
+        )
+
+    def get_telemetry_history_paginated(
+        self,
+        user_id: str,
+        limit: int = 20,
+        cursor: str | None = None,
+        task: str | None = None,
+        provider: str | None = None,
+    ) -> PaginatedTelemetryResponse:
+        """Retrieve paginated execution telemetry for the user using cursor pagination."""
+        res = ai_telemetry_repo.list_executions_paginated(
+            user_id=user_id,
+            limit=min(limit, 100),
+            cursor=cursor,
+            task=task,
+            provider=provider,
+        )
+
+        items: list[ExecutionTelemetryDTO] = []
+        for r in res.get("items", []):
+            try:
+                task_raw = str(r.get("task", ""))
+                try:
+                    task_enum = AITaskType(task_raw)
+                except ValueError:
+                    task_enum = AITaskType.JOB_INGESTION
+
+                provider_raw = str(r.get("providerUsed", ""))
+                try:
+                    provider_enum = ProviderType(provider_raw)
+                except ValueError:
+                    provider_enum = ProviderType.GEMINI
+
+                cost_raw = str(r.get("costTier", CostTier.FREE.value))
+                try:
+                    cost_enum = CostTier(cost_raw)
+                except ValueError:
+                    cost_enum = CostTier.FREE
+
+                items.append(
+                    ExecutionTelemetryDTO(
+                        executionId=str(r.get("executionId", "")),
+                        userId=user_id,
+                        operationId=r.get("operationId"),
+                        task=task_enum,
+                        providerUsed=provider_enum,
+                        modelUsed=str(r.get("modelUsed", "")),
+                        credentialIdUsed=str(r.get("credentialIdUsed", "")),
+                        success=bool(r.get("success", False)),
+                        latencyMs=float(r.get("latencyMs", 0.0)),
+                        fallbackLevel=int(r.get("fallbackLevel", 0)),
+                        hopsCount=int(r.get("hopsCount", 1)),
+                        failureCategory=r.get("failureCategory"),
+                        costTier=cost_enum,
+                        preferredCredentialId=r.get("preferredCredentialId"),
+                        preferredRouteSkipped=bool(r.get("preferredRouteSkipped", False)),
+                        preferredRouteSkipReason=r.get("preferredRouteSkipReason"),
+                        attemptedHops=r.get("attemptedHops", []),
+                        timestamp=str(r.get("timestamp", "")),
+                    )
+                )
+            except Exception as parse_err:
+                logger.debug(f"Skipping malformed telemetry record in history: {parse_err}")
+
+        return PaginatedTelemetryResponse(
+            items=items,
+            nextCursor=res.get("next_cursor"),
+            hasMore=bool(res.get("has_more", False)),
             timestamp=datetime.now(UTC).isoformat(),
         )
 

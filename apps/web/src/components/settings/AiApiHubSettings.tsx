@@ -1321,21 +1321,30 @@ export const AiApiHubSettings: React.FC = () => {
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Activity className="w-4 h-4 text-emerald-400" />
-                  Recent AI Activity
+                  <span>Recent AI Activity</span>
+                  <span className="text-xs font-normal text-primary-secondary">(Latest 5)</span>
                 </h3>
                 <p className="text-xs text-primary-secondary mt-0.5">
                   Audit trail of recent AI requests. Prompts and outputs are strictly stripped from logs.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={refreshTelemetry}
-                disabled={isTelemetryRefreshing}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-surface-subtle border border-border text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isTelemetryRefreshing ? 'animate-spin' : ''}`} />
-                Refresh usage
-              </button>
+              <div className="flex items-center gap-3">
+                <a
+                  href="#ai-activity"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+                >
+                  View Full Activity History &rarr;
+                </a>
+                <button
+                  type="button"
+                  onClick={refreshTelemetry}
+                  disabled={isTelemetryRefreshing}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-surface-subtle border border-border text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTelemetryRefreshing ? 'animate-spin' : ''}`} />
+                  Refresh usage
+                </button>
+              </div>
             </div>
 
             {/* Compact Usage Stats Bar */}
@@ -1371,7 +1380,7 @@ export const AiApiHubSettings: React.FC = () => {
               <table className="w-full text-left text-xs text-primary-secondary">
                 <thead className="bg-surface-subtle/80 text-white font-medium border-b border-border text-[11px] uppercase tracking-wider">
                   <tr>
-                    <th className="py-2.5 px-3">Time</th>
+                    <th className="py-2.5 px-3">Date & Time</th>
                     <th className="py-2.5 px-3">Task</th>
                     <th className="py-2.5 px-3">Provider</th>
                     <th className="py-2.5 px-3">Credential</th>
@@ -1391,10 +1400,16 @@ export const AiApiHubSettings: React.FC = () => {
                       </td>
                     </tr>
                   ) : (
-                    recentExecutions.slice(0, 10).map((item) => (
+                    recentExecutions.slice(0, 5).map((item) => (
                       <tr key={item.executionId} className="hover:bg-surface-subtle/40 transition-colors">
-                        <td className="py-2.5 px-3 text-[11px] font-mono text-primary-secondary">
-                          {new Date(item.timestamp).toLocaleTimeString()}
+                        <td className="py-2.5 px-3 text-[11px] font-mono text-primary-secondary whitespace-nowrap">
+                          {new Date(item.timestamp).toLocaleString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                          })}
                         </td>
                         <td className="py-2.5 px-3 font-medium text-white">{item.task}</td>
                         <td className="py-2.5 px-3 uppercase text-[11px]">{item.providerUsed}</td>
@@ -1434,6 +1449,18 @@ export const AiApiHubSettings: React.FC = () => {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[11px] text-primary-secondary">
+                Showing {Math.min(5, recentExecutions.length)} most recent activities.
+              </span>
+              <a
+                href="#ai-activity"
+                className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
+              >
+                Open Recent AI Activities for full history, cursor pagination & hop traces &rarr;
+              </a>
             </div>
           </div>
       </div>

@@ -2,6 +2,7 @@
 
 import io
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException, Response
@@ -50,6 +51,7 @@ async def generate_application_artifacts(
         raise HTTPException(status_code=404, detail="Master Profile not found. Please create your profile first.")
 
     try:
+        operation_id = f"op_{uuid.uuid4().hex[:12]}"
         response = await resume_generator.generate_application_artifacts(
             job=job,
             profile=profile,
@@ -57,6 +59,7 @@ async def generate_application_artifacts(
             tone=request.coverLetterTone,
             custom_instructions=request.customInstructions,
             force_regenerate=request.forceRegenerate,
+            operation_id=operation_id,
         )
         return response
     except Exception as e:

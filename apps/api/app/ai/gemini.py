@@ -89,6 +89,7 @@ class GeminiProvider(AIProvider):
         temperature: float = 0.2,
         task: AITaskType = AITaskType.JOB_INGESTION,
         user_id: str | None = None,
+        operation_id: str | None = None,
     ) -> str:
         """Generate unstructured text with instant model fallback via AIOrchestrator."""
         effective_user_id = user_id or self.user_id
@@ -98,6 +99,7 @@ class GeminiProvider(AIProvider):
             prompt=prompt,
             system_instruction=system_instruction,
             temperature=temperature,
+            operation_id=operation_id,
         )
 
         use_explicit = self._has_explicit_chain
@@ -120,6 +122,7 @@ class GeminiProvider(AIProvider):
         temperature: float = 0.1,
         task: AITaskType = AITaskType.JOB_INGESTION,
         user_id: str | None = None,
+        operation_id: str | None = None,
     ) -> T:
         """Generate validated Pydantic structured output with schema self-repair via AIOrchestrator."""
         effective_user_id = user_id or self.user_id
@@ -130,6 +133,7 @@ class GeminiProvider(AIProvider):
             system_instruction=system_instruction,
             temperature=temperature,
             schema_cls=schema,
+            operation_id=operation_id,
         )
 
         use_explicit = self._has_explicit_chain

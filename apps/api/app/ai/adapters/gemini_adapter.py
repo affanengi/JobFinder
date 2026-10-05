@@ -83,6 +83,49 @@ class GeminiAdapter(BaseProviderAdapter):
         self._client = genai.Client(api_key=key)
         return self._client
 
+    def _parse_rate_limit_details(self, error: Exception) -> tuple[bool, float | None, str | None]:
+        """Extract structured rate-limit and quota information from provider error.
+
+        Returns:
+            (is_project_quota_exhausted, retry_after, quota_metric)
+        """
+        is_project_exhausted = False
+        retry_after: float | None = None
+        quota_metric: str | None = None
+
+        raw_details = getattr(error, "details", None)
+        if raw_details:
+            details_list = raw_details if isinstance(raw_details, (list, tuple)) else [raw_details]
+            for item in details_list:
+                if isinstance(item, dict):
+                    reason = str(item.get("reason", "")).upper()
+                    metadata = item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}
+                    q_metric = metadata.get("quota_metric") or metadata.get("metric", "")
+                    if q_metric:
+                        quota_metric = str(q_metric)
+                    if "QUOTA" in reason and any(term in str(q_metric).lower() for term in ("day", "daily", "project")):
+                        is_project_exhausted = True
+                elif hasattr(item, "reason"):
+                    reason = str(getattr(item, "reason", "")).upper()
+                    metadata = getattr(item, "metadata", {}) or {}
+                    q_metric = metadata.get("quota_metric", "") if isinstance(metadata, dict) else ""
+                    if q_metric:
+                        quota_metric = str(q_metric)
+                    if "QUOTA" in reason and any(term in str(q_metric).lower() for term in ("day", "daily", "project")):
+                        is_project_exhausted = True
+
+        response = getattr(error, "response", None)
+        if response is not None:
+            headers = getattr(response, "headers", {}) or {}
+            ra = headers.get("retry-after") or headers.get("Retry-After")
+            if ra:
+                try:
+                    retry_after = float(ra)
+                except (ValueError, TypeError):
+                    pass
+
+        return is_project_exhausted, retry_after, quota_metric
+
     def classify_error(self, error: Exception, model: str) -> AIProviderError:
         """Classify a raw Gemini/Google API error into a typed domain exception."""
         if isinstance(error, AIProviderError):
@@ -98,10 +141,14 @@ class GeminiAdapter(BaseProviderAdapter):
             or "rate limit" in err_str
             or "too many requests" in err_str
         ):
+            is_proj, ra, q_metric = self._parse_rate_limit_details(error)
             return AIRateLimitError(
                 f"Rate limit / Quota exceeded on model {model}: {safe_msg}",
                 model=model,
                 status_code=429,
+                is_project_quota_exhausted=is_proj,
+                retry_after=ra,
+                quota_metric=q_metric,
             )
 
         if isinstance(error, genai_errors.ClientError):
@@ -136,10 +183,14 @@ class GeminiAdapter(BaseProviderAdapter):
                 or "resource_exhausted" in err_str
                 or "quota" in err_str
             ):
+                is_proj, ra, q_metric = self._parse_rate_limit_details(error)
                 return AIRateLimitError(
                     f"Rate limit / Quota exceeded on model {model}: {safe_msg}",
                     model=model,
                     status_code=429,
+                    is_project_quota_exhausted=is_proj,
+                    retry_after=ra,
+                    quota_metric=q_metric,
                 )
             if code == 400 or "400" in err_str:
                 return AIRequestError(

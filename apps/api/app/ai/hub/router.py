@@ -235,15 +235,16 @@ class AIRouter:
                         continue
 
                     # Determine ranking priority:
-                    # Under FREE_PREFERRED, all free models across providers are attempted before paid fallback
+                    # 1. Cost Policy Penalty (under FREE_PREFERRED, paid models get +100000)
                     if user_profile.cost_policy == CostPolicy.FREE_PREFERRED:
-                        cost_penalty = 0 if cost_check.effective_tier == CostTier.FREE else 10000
+                        cost_penalty = 0 if cost_check.effective_tier == CostTier.FREE else 100000
                     else:
                         cost_penalty = 0
 
-                    # Task-specific routing preference bonus:
-                    # Supports credential-level (-10000 bonus), provider-level (-5000 bonus),
-                    # and intra-provider credential fallback (-5000 bonus).
+                    # 2. Hierarchical Preference Tiers:
+                    # Tier 1 (0): Exact Preferred Credential or Provider Preference
+                    # Tier 2 (10000): Intra-provider sibling credentials under same provider
+                    # Tier 3 (20000 + provider_idx * 10000): Alternate providers
                     task_key = (
                         request.task.value if hasattr(request.task, "value") else str(request.task)
                     )
@@ -263,33 +264,55 @@ class AIRouter:
                             preferred_target = user_profile.task_routing[k]
                             break
 
-                    if preferred_target and cred_id and cred_id == preferred_target:
-                        # Highest preference: exact credential target
-                        task_bonus = -10000
-                    elif preferred_target:
-                        target_cred = next(
-                            (c for c in user_profile.credentials if c.id == preferred_target),
-                            None,
-                        )
-                        if target_cred and target_cred.provider == provider_type:
-                            # Sibling credential under the same provider as preferred credential
-                            task_bonus = -5000
-                        elif (
-                            provider_type.value.lower() == preferred_target.lower()
-                            or str(provider_type).lower() == preferred_target.lower()
-                        ):
-                            # Provider-level preference
-                            task_bonus = -5000
+                    is_exact_preferred_cred = False
+                    is_sibling_of_preferred_cred = False
+                    is_preferred_provider = False
+
+                    if preferred_target:
+                        if cred_id and cred_id == preferred_target:
+                            is_exact_preferred_cred = True
                         else:
-                            task_bonus = 0
+                            target_cred = next(
+                                (c for c in user_profile.credentials if c.id == preferred_target),
+                                None,
+                            )
+                            if target_cred and target_cred.provider == provider_type:
+                                is_sibling_of_preferred_cred = True
+                            elif (
+                                provider_type.value.lower() == preferred_target.lower()
+                                or str(provider_type).lower() == preferred_target.lower()
+                            ):
+                                is_preferred_provider = True
+
+                    if is_exact_preferred_cred:
+                        base_tier = 0
+                    elif is_preferred_provider:
+                        base_tier = 0
+                    elif is_sibling_of_preferred_cred:
+                        base_tier = 10000
                     else:
-                        task_bonus = 0
+                        base_tier = 20000 + (provider_idx * 10000)
+
+                    # Remove raw credential-array-index bias (cred_idx * 100).
+                    # Check if this sibling credential is explicitly preferred for another task:
+                    is_reserved_for_other_task = False
+                    if not is_exact_preferred_cred and cred_id:
+                        for other_task, other_target in user_profile.task_routing.items():
+                            if other_task not in aliases and other_target == cred_id:
+                                is_reserved_for_other_task = True
+                                break
+
+                    cred_bias = 2000 if is_reserved_for_other_task else 0
+
+                    # Deterministic grouping by sorted credential ID to keep all models of a credential together
+                    distinct_creds = sorted([c[0] for c in cred_list if c[0]])
+                    cred_rank = distinct_creds.index(cred_id) if (cred_id and cred_id in distinct_creds) else 0
 
                     candidate_priority = (
                         cost_penalty
-                        + task_bonus
-                        + (provider_idx * 1000)
-                        + (cred_idx * 100)
+                        + base_tier
+                        + cred_bias
+                        + (cred_rank * 100)
                         + model_desc.default_priority
                     )
 
