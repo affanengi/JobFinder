@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Acme Corp - Senior Frontend Engineer</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+    .job-details { margin-bottom: 30px; }
+    #application_form_wrapper { display: none; margin-top: 30px; border-top: 2px solid #ddd; padding-top: 20px; }
+    .field { margin-bottom: 12px; }
+    label { display: block; font-weight: bold; margin-bottom: 4px; }
+    input, textarea { width: 100%; padding: 8px; box-sizing: border-box; }
+    button { padding: 10px 20px; background: #0066cc; color: white; border: none; border-radius: 4px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="job-details">
+    <h1>Senior Frontend Engineer</h1>
+    <p>Acme Corp • San Francisco, CA • Full-time</p>
+    <p>Join Acme Corp to build revolutionary web platforms...</p>
+    <div style="margin-top: 20px;">
+      <button id="apply_cta" type="button" onclick="showForm()">Apply for this job</button>
+      <button type="button" style="background:#888;margin-left:10px;">Share</button>
+    </div>
+  </div>
+
+  <div id="application_form_wrapper">
+    <h2>Submit Your Application</h2>
+    <form id="application_form">
+      <div class="field">
+        <label for="first_name">First Name *</label>
+        <input type="text" id="first_name" name="first_name" required>
+      </div>
+      <div class="field">
+        <label for="last_name">Last Name *</label>
+        <input type="text" id="last_name" name="last_name" required>
+      </div>
+      <div class="field">
+        <label for="email">Email *</label>
+        <input type="email" id="email" name="email" required>
+      </div>
+      <div class="field">
+        <label for="phone">Phone</label>
+        <input type="tel" id="phone" name="phone">
+      </div>
+      <div class="field" id="resume_section">
+        <label for="resume">Resume / CV *</label>
+        <input type="file" id="resume" name="resume">
+      </div>
+      <div class="field">
+        <label for="linkedin">LinkedIn Profile</label>
+        <input type="text" id="linkedin" name="urls[LinkedIn]">
+      </div>
+      <div class="field">
+        <label for="cover_letter">Cover Letter Note</label>
+        <textarea id="cover_letter" name="comments"></textarea>
+      </div>
+      <button type="submit" id="submit_application">Submit Application</button>
+    </form>
+  </div>
+
+  <script>
+    function showForm() {
+      document.getElementById('application_form_wrapper').style.display = 'block';
+      document.getElementById('apply_cta').style.display = 'none';
+    }
+  </script>
+</body>
+</html>

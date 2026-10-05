@@ -1,0 +1,11 @@
+{
+  "name": "job-finder-root",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix apps/web run dev",
+    "build": "npm --prefix apps/web run build && npm --prefix apps/extension run build",
+    "build:extension": "npm --prefix apps/extension run build",
+    "test": "pytest apps/api/tests && npm --prefix apps/web test:run && npm --prefix apps/extension test",
+    "test:extension": "npm --prefix apps/extension test"
+  }
+}

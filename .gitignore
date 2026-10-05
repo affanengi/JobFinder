@@ -1,0 +1,98 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+ENV/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+dist/
+dist-ssr/
+*.local
+
+# Environment & Secrets (NEVER COMMIT)
+.env
+.env.*
+!.env.example
+service-account.json
+firebase-adminsdk*.json
+*.pem
+*.key
+
+# Specification & Architecture Documentation (User Ignored)
+PRD.md
+TECH_STACK.md
+RULES.md
+SCHEMA.md
+TODO.md
+DESIGN_SYSTEM.md
+docs/PRD.md
+docs/TECH_STACK.md
+docs/RULES.md
+docs/SCHEMA.md
+docs/TODO.md
+docs/DESIGN_SYSTEM.md
+
+# Playwright & Browsers
+test-results/
+playwright-report/
+playwright/.cache/
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+thumbs.db
+
+# Graphify Outputs & Temp
+graphify-out/
+
+# Firebase & Cloud Keys
+serviceAccountKey.json
+*serviceAccount*.json
+*firebase*.json
+*.json.secret
+
+# Local Development Audits
+.audit/
+
+# Agents & Custom Workflows (Local Only)
+.agents/
+
+# Scratch & Temporary
+scratch/
+apps/scratch/
+apps/api/scratch/

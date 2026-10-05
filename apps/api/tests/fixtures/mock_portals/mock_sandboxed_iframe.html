@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Mock Sandboxed Frame Test</title>
+</head>
+<body>
+  <!-- Sandboxed frame that restricts script/DOM inspection -->
+  <iframe id="restricted_frame" sandbox="" src="about:blank" style="display:none;"></iframe>
+
+  <div id="main_application">
+    <h2>Apply Here</h2>
+    <form id="accessible_form">
+      <label for="first_name">First Name</label>
+      <input type="text" id="first_name" name="first_name">
+      <label for="last_name">Last Name</label>
+      <input type="text" id="last_name" name="last_name">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email">
+      <button type="submit" id="submit_btn">Submit Application</button>
+    </form>
+  </div>
+</body>
+</html>

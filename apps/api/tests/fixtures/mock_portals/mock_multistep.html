@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Enterprise Multi-Step Job Application</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; }
+    .step-indicator { display: flex; justify-content: space-between; margin-bottom: 24px; font-weight: bold; }
+    .step-indicator span.active { color: #0066cc; }
+    .step-pane { display: none; }
+    .step-pane.active { display: block; }
+    .field { margin-bottom: 14px; }
+    label { display: block; font-weight: 600; margin-bottom: 4px; }
+    input, textarea { width: 100%; padding: 8px; box-sizing: border-box; }
+    button { padding: 10px 20px; cursor: pointer; }
+    .btn-next { background: #0066cc; color: white; border: none; border-radius: 4px; }
+    .btn-submit { background: #10b981; color: white; border: none; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="step-indicator">
+    <span id="ind_step1" class="active">1. Contact Info</span>
+    <span id="ind_step2">2. Questions & Submit</span>
+  </div>
+
+  <form id="multistep_application_form">
+    <!-- Step 1: Contact Information -->
+    <div id="pane_step1" class="step-pane active">
+      <h3>Step 1: Personal Information</h3>
+      <div class="field">
+        <label for="first_name">First Name</label>
+        <input type="text" id="first_name" name="first_name">
+      </div>
+      <div class="field">
+        <label for="last_name">Last Name</label>
+        <input type="text" id="last_name" name="last_name">
+      </div>
+      <div class="field">
+        <label for="email">Email Address</label>
+        <input type="email" id="email" name="email">
+      </div>
+      <div class="field">
+        <label for="phone">Phone Number</label>
+        <input type="tel" id="phone" name="phone">
+      </div>
+      <div class="field">
+        <label for="resume">Upload Resume</label>
+        <input type="file" id="resume" name="resume">
+      </div>
+      <div style="margin-top: 20px;">
+        <button id="btn_next" type="button" class="btn-next" onclick="goToStep2()">Save and Continue</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Custom Questions & Final Submit -->
+    <div id="pane_step2" class="step-pane">
+      <h3>Step 2: Role-Specific Questions</h3>
+      <div class="field">
+        <label for="custom_experience">Describe your experience with distributed systems:</label>
+        <textarea id="custom_experience" name="custom_experience"></textarea>
+      </div>
+      <div style="margin-top: 20px;">
+        <button id="btn_prev" type="button" onclick="goToStep1()">Back</button>
+        <button id="btn_submit" type="submit" class="btn-submit">Submit Application</button>
+      </div>
+    </div>
+  </form>
+
+  <script>
+    function goToStep2() {
+      document.getElementById('pane_step1').classList.remove('active');
+      document.getElementById('pane_step2').classList.add('active');
+      document.getElementById('ind_step1').classList.remove('active');
+      document.getElementById('ind_step2').classList.add('active');
+    }
+    function goToStep1() {
+      document.getElementById('pane_step2').classList.remove('active');
+      document.getElementById('pane_step1').classList.add('active');
+      document.getElementById('ind_step2').classList.remove('active');
+      document.getElementById('ind_step1').classList.add('active');
+    }
+  </script>
+</body>
+</html>
