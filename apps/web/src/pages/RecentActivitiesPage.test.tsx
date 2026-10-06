@@ -118,22 +118,31 @@ const mockPage2 = {
 };
 
 describe('RecentActivitiesPage', () => {
+  const createResponse = (data: unknown) =>
+    Promise.resolve(
+      new Response(JSON.stringify(data), {
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+      })
+    );
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fetchWithAuth).mockImplementation((url: string) => {
-      if (url.includes('/api/v1/ai/telemetry/summary')) {
-        return Promise.resolve({ ok: true, json: async () => mockSummary });
-      }
-      if (url.includes('/api/v1/ai/credentials')) {
-        return Promise.resolve({ ok: true, json: async () => mockCredentials });
-      }
       if (url.includes('/api/v1/ai/telemetry/history')) {
         if (url.includes('cursor=2026-10-05T17%3A59%3A00Z') || url.includes('cursor=2026-10-05T17:59:00Z')) {
-          return Promise.resolve({ ok: true, json: async () => mockPage2 });
+          return createResponse(mockPage2);
         }
-        return Promise.resolve({ ok: true, json: async () => mockPage1 });
+        return createResponse(mockPage1);
       }
-      return Promise.resolve({ ok: true, json: async () => ({}) });
+      if (url.includes('/api/v1/ai/telemetry')) {
+        return createResponse(mockSummary);
+      }
+      if (url.includes('/api/v1/ai/credentials')) {
+        return createResponse(mockCredentials);
+      }
+      return createResponse({});
     });
   });
 

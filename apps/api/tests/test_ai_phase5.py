@@ -338,7 +338,7 @@ def test_08_models_catalog_endpoint():
 # 9. Telemetry Initial Empty State
 # ==============================================================================
 def test_09_telemetry_summary_empty_state():
-    """Verify GET /api/v1/ai/telemetry returns true empty summary without fake data."""
+    """Verify GET /api/v1/ai/telemetry and alias /telemetry/summary return true empty summary without fake data."""
     app.dependency_overrides[get_authenticated_user_id] = lambda: USER_A
 
     res = client.get("/api/v1/ai/telemetry")
@@ -351,6 +351,12 @@ def test_09_telemetry_summary_empty_state():
     assert summary["successRate"] == 0.0
     assert summary["fallbackCount"] == 0
     assert data["recentExecutions"] == []
+
+    # Also verify the /telemetry/summary alias endpoint
+    alias_res = client.get("/api/v1/ai/telemetry/summary")
+    assert alias_res.status_code == 200
+    assert alias_res.json()["summary"] == summary
+    assert alias_res.json()["recentExecutions"] == data["recentExecutions"]
 
 
 # ==============================================================================

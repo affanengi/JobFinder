@@ -178,6 +178,12 @@ async def get_models(
     summary="Get user AI execution telemetry",
     description="Retrieve aggregated statistics and recent execution records scoped strictly to the authenticated user.",
 )
+@router.get(
+    "/telemetry/summary",
+    response_model=TelemetryResponse,
+    summary="Get user AI execution telemetry summary",
+    description="Alias for /telemetry retrieving aggregated statistics and recent execution records.",
+)
 async def get_telemetry(
     limit: int = 50,
     user_id: str = Depends(get_authenticated_user_id),

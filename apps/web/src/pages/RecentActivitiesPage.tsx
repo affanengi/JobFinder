@@ -130,7 +130,7 @@ interface CredentialApiItem {
   // Fetch Summary
   const fetchSummary = useCallback(async () => {
     try {
-      const res = await fetchWithAuth('/api/v1/ai/telemetry/summary');
+      const res = await fetchWithAuth('/api/v1/ai/telemetry');
       if (res.ok) {
         const data = await res.json();
         setSummary(data);
