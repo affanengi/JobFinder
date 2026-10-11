@@ -1329,12 +1329,6 @@ export const AiApiHubSettings: React.FC = () => {
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                <a
-                  href="#ai-activity"
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
-                >
-                  View Full Activity History &rarr;
-                </a>
                 <button
                   type="button"
                   onClick={refreshTelemetry}
@@ -1459,7 +1453,7 @@ export const AiApiHubSettings: React.FC = () => {
                 href="#ai-activity"
                 className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
               >
-                Open Recent AI Activities for full history, cursor pagination & hop traces &rarr;
+                View Full Activity &rarr;
               </a>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Activity,
   RefreshCw,
@@ -12,6 +12,9 @@ import {
   Zap,
   ShieldCheck,
   AlertTriangle,
+  Copy,
+  Check,
+  HelpCircle,
 } from 'lucide-react';
 import { fetchWithAuth } from '../lib/api';
 import { Modal } from '../components/ui/Modal';
@@ -39,10 +42,16 @@ export interface ExecutionItem {
   hopsCount: number;
   failureCategory?: string | null;
   costTier: string;
+  preferenceConfigured?: boolean | null;
   preferredCredentialId?: string | null;
   preferredRouteSkipped?: boolean;
   preferredRouteSkipReason?: string | null;
-  attemptedHops?: HopDetail[];
+  preferenceStatus?: string;
+  executionResult?: string;
+  routeClassification?: string;
+  executionOutcome?: string;
+  traceStatus?: string;
+  attemptedHops?: HopDetail[] | null;
   timestamp: string;
 }
 
@@ -50,8 +59,9 @@ export interface TelemetrySummary {
   totalRequests: number;
   successfulRequests: number;
   failedRequests: number;
-  successRate: number;
-  averageLatencyMs: number;
+  indeterminateRequests?: number;
+  successRate: number | null;
+  averageLatencyMs: number | null;
   fallbackCount: number;
   providerDistribution: Record<string, number>;
   taskDistribution: Record<string, number>;
@@ -63,14 +73,25 @@ export interface CredentialMeta {
   provider: string;
 }
 
+interface CredentialApiItem {
+  id?: string;
+  credentialId?: string;
+  friendlyName?: string;
+  name?: string;
+  provider: string;
+}
+
 const TASK_OPTIONS = [
   { value: '', label: 'All Tasks' },
   { value: 'resume_tailoring', label: 'Resume Tailoring' },
   { value: 'cover_letter_gen', label: 'Cover Letter Generation' },
-  { value: 'ats_scanner', label: 'ATS Scanner' },
+  { value: 'dual_artifact_gen', label: 'Dual Artifact Generation' },
+  { value: 'ats_bullet_rewrite', label: 'ATS Bullet Rewrite' },
+  { value: 'ats_bulk_rewrite', label: 'ATS Bulk Rewrite' },
   { value: 'qa_copilot', label: 'QA Copilot' },
-  { value: 'job_matching', label: 'Job Matching' },
-  { value: 'profile_extraction', label: 'Profile Extraction' },
+  { value: 'resume_parsing', label: 'Resume Parsing' },
+  { value: 'job_ingestion', label: 'Job Ingestion' },
+  { value: 'job_analysis', label: 'Job Analysis' },
 ];
 
 const PROVIDER_OPTIONS = [
@@ -86,7 +107,8 @@ export const RecentActivitiesPage: React.FC = () => {
   const [executions, setExecutions] = useState<ExecutionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [tableError, setTableError] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   // Filters
   const [selectedTask, setSelectedTask] = useState<string>('');
@@ -100,14 +122,18 @@ export const RecentActivitiesPage: React.FC = () => {
 
   // Hop Trace Modal
   const [selectedItemForTrace, setSelectedItemForTrace] = useState<ExecutionItem | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-interface CredentialApiItem {
-  id?: string;
-  credentialId?: string;
-  friendlyName?: string;
-  name?: string;
-  provider: string;
-}
+  // Race condition protection & abort controllers
+  const activeRequestIdRef = useRef<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Copy helper
+  const handleCopy = (text: string, label: string) => {
+    navigator.clipboard?.writeText(text);
+    setCopiedId(label);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   // Load credentials once to map friendly names
   useEffect(() => {
@@ -127,28 +153,44 @@ interface CredentialApiItem {
       .catch(() => {});
   }, []);
 
-  // Fetch Summary
-  const fetchSummary = useCallback(async () => {
-    try {
-      const res = await fetchWithAuth('/api/v1/ai/telemetry');
-      if (res.ok) {
-        const data = await res.json();
-        setSummary(data);
+  // Fetch Summary with filter synchronization
+  const fetchSummary = useCallback(
+    async (signal?: AbortSignal, currentReqId?: number) => {
+      setSummaryError(null);
+      try {
+        const params = new URLSearchParams();
+        if (selectedTask) params.set('task', selectedTask);
+        if (selectedProvider) params.set('provider', selectedProvider);
+
+        const url = `/api/v1/ai/telemetry${params.toString() ? `?${params.toString()}` : ''}`;
+        const res = await fetchWithAuth(url, { signal });
+        if (currentReqId !== undefined && currentReqId !== activeRequestIdRef.current) return;
+
+        if (res.ok) {
+          const data = await res.json();
+          // Safe unboxing of TelemetryResponse.summary
+          setSummary(data.summary ?? data);
+        } else {
+          setSummaryError(`Summary metrics unavailable (HTTP ${res.status})`);
+        }
+      } catch (e: unknown) {
+        if (e instanceof Error && e.name === 'AbortError') return;
+        if (currentReqId !== undefined && currentReqId !== activeRequestIdRef.current) return;
+        setSummaryError('Failed to load activity summary metrics');
       }
-    } catch (e) {
-      console.error('Failed to load telemetry summary:', e);
-    }
-  }, []);
+    },
+    [selectedTask, selectedProvider]
+  );
 
   // Fetch Paginated History
   const fetchHistory = useCallback(
-    async (cursor: string | null = null, isRefresh = false) => {
+    async (cursor: string | null = null, isRefresh = false, signal?: AbortSignal, currentReqId?: number) => {
       if (isRefresh) {
         setRefreshing(true);
       } else {
         setLoading(true);
       }
-      setError(null);
+      setTableError(null);
 
       try {
         const params = new URLSearchParams({ limit: '15' });
@@ -156,32 +198,50 @@ interface CredentialApiItem {
         if (selectedTask) params.set('task', selectedTask);
         if (selectedProvider) params.set('provider', selectedProvider);
 
-        const res = await fetchWithAuth(`/api/v1/ai/telemetry/history?${params.toString()}`);
+        const res = await fetchWithAuth(`/api/v1/ai/telemetry/history?${params.toString()}`, { signal });
+        if (currentReqId !== undefined && currentReqId !== activeRequestIdRef.current) return;
+
         if (!res.ok) {
           throw new Error(`Failed to load AI activity history: HTTP ${res.status}`);
         }
 
         const data = await res.json();
         setExecutions(data.items || []);
-        setNextCursor(data.next_cursor || null);
-        setHasMore(Boolean(data.has_more));
+        // Reconcile camelCase and snake_case cursor pagination contracts
+        setNextCursor(data.nextCursor ?? data.next_cursor ?? null);
+        setHasMore(Boolean(data.hasMore ?? data.has_more));
       } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        if (currentReqId !== undefined && currentReqId !== activeRequestIdRef.current) return;
         const msg = err instanceof Error ? err.message : 'Error fetching activity records.';
-        setError(msg);
+        setTableError(msg);
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (currentReqId === undefined || currentReqId === activeRequestIdRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [selectedTask, selectedProvider]
   );
 
-  // Initial load or filter change
+  // Synchronous filter change and initial load handling
   useEffect(() => {
+    // Increment monotonic request counter and abort previous in-flight requests
+    const nextReqId = ++activeRequestIdRef.current;
+    abortControllerRef.current?.abort();
+    const abortCtrl = new AbortController();
+    abortControllerRef.current = abortCtrl;
+
     setPageIndex(1);
     setCursorStack([null]);
-    fetchSummary();
-    fetchHistory(null);
+
+    fetchSummary(abortCtrl.signal, nextReqId);
+    fetchHistory(null, false, abortCtrl.signal, nextReqId);
+
+    return () => {
+      abortCtrl.abort();
+    };
   }, [fetchSummary, fetchHistory, selectedTask, selectedProvider]);
 
   // Handle Next Page
@@ -203,10 +263,11 @@ interface CredentialApiItem {
   };
 
   const getCredentialName = (credId: string) => {
+    if (!credId) return 'Unrecorded Credential';
     const match = credentials.find((c) => c.id === credId);
     if (match) return match.friendlyName;
     if (credId.startsWith('server_')) return 'Default Server Key';
-    return credId;
+    return `Key (${credId})`;
   };
 
   const formatDateTime = (isoString: string) => {
@@ -223,6 +284,208 @@ interface CredentialApiItem {
     } catch {
       return isoString;
     }
+  };
+
+  // Render Table Preference Badge
+  const renderPreferenceBadge = (item: ExecutionItem) => {
+    const status = item.preferenceStatus;
+
+    if (status === 'CONFIRMED_PREFERRED_ATTEMPTED') {
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+          Preferred Attempted
+        </span>
+      );
+    }
+    if (status === 'CONFIRMED_PREFERRED_SKIPPED_REASON') {
+      return (
+        <span
+          title={`Bypassed: ${item.preferredRouteSkipReason}`}
+          className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20"
+        >
+          Skipped ({item.preferredRouteSkipReason})
+        </span>
+      );
+    }
+    if (status === 'CONFIRMED_PREFERRED_SKIPPED_NO_REASON') {
+      return (
+        <span
+          title="Bypassed (Reason Unrecorded)"
+          className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20"
+        >
+          Skipped (Reason Unrecorded)
+        </span>
+      );
+    }
+    if (status === 'CONFIRMED_PREFERRED_UNVERIFIED') {
+      return (
+        <span
+          title="Preferred credential was pinned; hop details missing"
+          className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-300/80 border border-amber-500/20"
+        >
+          Preferred Pinned (Trace Missing)
+        </span>
+      );
+    }
+    if (status === 'PREFERRED_FIRST_HOP_MISMATCH') {
+      return (
+        <span
+          title="Preferred was pinned, but Hop 1 targeted a different credential"
+          className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20"
+        >
+          Preferred Pinned (Hop Mismatch)
+        </span>
+      );
+    }
+    if (status === 'CONFIRMED_NO_PREFERENCE') {
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">
+          No Preference
+        </span>
+      );
+    }
+    if (status === 'PREFERENCE_NOT_RECORDED') {
+      return (
+        <span
+          title="Telemetry pre-dates preference tracking (Historical)"
+          className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800/40 text-slate-400 border border-slate-700/40"
+        >
+          Preference Not Recorded
+        </span>
+      );
+    }
+    if (status === 'PREFERENCE_CONTRADICTORY_EVIDENCE') {
+      return (
+        <span
+          title="Internal conflict between preference flags and hop sequence"
+          className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-500/10 text-rose-300 border border-rose-500/20"
+        >
+          Preference Conflict
+        </span>
+      );
+    }
+
+    // Fallback based on raw fields
+    if (item.preferredCredentialId) {
+      if (item.preferredRouteSkipped) {
+        return (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20">
+            Skipped ({item.preferredRouteSkipReason || 'Reason Unrecorded'})
+          </span>
+        );
+      }
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+          Preferred Attempted
+        </span>
+      );
+    }
+    if (item.preferenceConfigured === false) {
+      return <span className="text-[10px] text-primary-secondary">No Preference</span>;
+    }
+    return <span className="text-[10px] text-primary-secondary">Preference Not Recorded</span>;
+  };
+
+  // Render Table Outcome Badge
+  const renderOutcomeBadge = (item: ExecutionItem) => {
+    const outcome = item.executionOutcome;
+
+    if (outcome === 'DIRECT_SUCCESS') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Direct Success
+        </span>
+      );
+    }
+    if (outcome === 'FALLBACK_SUCCESS') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Fallback Success
+        </span>
+      );
+    }
+    if (outcome === 'SUCCESS_UNKNOWN_ROUTE') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Success (Route Unverified)
+        </span>
+      );
+    }
+    if (outcome === 'DIRECT_FAILURE') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-400">
+          <XCircle className="w-3.5 h-3.5" />
+          {item.failureCategory || 'Direct Failed'}
+        </span>
+      );
+    }
+    if (outcome === 'FALLBACK_FAILURE') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-400">
+          <XCircle className="w-3.5 h-3.5" />
+          {item.failureCategory || 'Fallback Failed'}
+        </span>
+      );
+    }
+    if (outcome === 'FAILURE_UNKNOWN_ROUTE') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-400">
+          <XCircle className="w-3.5 h-3.5" />
+          {item.failureCategory || 'Failed (Route Unverified)'}
+        </span>
+      );
+    }
+    if (outcome === 'CONTRADICTORY_OUTCOME') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-400">
+          <AlertTriangle className="w-3.5 h-3.5" />
+          Outcome Conflict
+        </span>
+      );
+    }
+    if (outcome === 'INDETERMINATE_OUTCOME') {
+      return <span className="text-[11px] text-slate-400">Outcome Unrecorded</span>;
+    }
+
+    // Direct fallback from boolean success
+    return item.success ? (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
+        <CheckCircle2 className="w-3.5 h-3.5" />
+        Success
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-400">
+        <XCircle className="w-3.5 h-3.5" />
+        {item.failureCategory || 'Failed'}
+      </span>
+    );
+  };
+
+  // Render Fallback Narrative in Modal
+  const renderFallbackNarrative = (item: ExecutionItem) => {
+    const hops = item.attemptedHops;
+    const prefId = item.preferredCredentialId;
+    const firstHop = hops && hops.length > 0 ? hops[0] : null;
+
+    if (item.preferenceStatus === 'CONFIRMED_PREFERRED_SKIPPED_REASON') {
+      return `Preferred credential was bypassed before attempt (${item.preferredRouteSkipReason}) → Fallback succeeded on ${getCredentialName(item.credentialIdUsed)}`;
+    }
+    if (firstHop && prefId && firstHop.credential_id === prefId && firstHop.status === 'FAILED' && item.success) {
+      return `Preferred credential failed in Hop 1 (${firstHop.error || 'Provider Error'}) → Fallback succeeded on ${getCredentialName(item.credentialIdUsed)}`;
+    }
+    if (item.hopsCount > 1 && item.success && (!firstHop || !prefId || firstHop.status !== 'FAILED')) {
+      return `Execution required fallback (${item.hopsCount} hops) → Earlier attempts unverified, final success on ${getCredentialName(item.credentialIdUsed)}`;
+    }
+    if (item.routeClassification === 'UNKNOWN_ROUTE') {
+      return `Route chronology was not recorded for this execution → Final landed credential: ${getCredentialName(item.credentialIdUsed)}`;
+    }
+    if (item.hopsCount === 1 && !item.fallbackLevel) {
+      return `Direct attempt executed successfully without fallback on ${getCredentialName(item.credentialIdUsed)}`;
+    }
+    return `Execution resolved on ${getCredentialName(item.credentialIdUsed)}`;
   };
 
   return (
@@ -242,9 +505,10 @@ interface CredentialApiItem {
           <button
             type="button"
             onClick={() => {
-              fetchSummary();
+              const nextReqId = ++activeRequestIdRef.current;
+              fetchSummary(undefined, nextReqId);
               const currentCursor = cursorStack[pageIndex - 1] ?? null;
-              fetchHistory(currentCursor, true);
+              fetchHistory(currentCursor, true, undefined, nextReqId);
             }}
             disabled={refreshing}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-surface-subtle border border-border text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
@@ -255,6 +519,23 @@ interface CredentialApiItem {
         </div>
       </div>
 
+      {/* Summary Error Notice */}
+      {summaryError && (
+        <div className="bg-amber-950/20 border border-amber-500/30 p-2.5 rounded-xl flex items-center justify-between text-xs text-amber-300">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            <span>{summaryError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchSummary()}
+            className="underline hover:text-white cursor-pointer"
+          >
+            Retry Summary
+          </button>
+        </div>
+      )}
+
       {/* Top Metric Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-surface-subtle p-3.5 rounded-xl border border-border">
@@ -263,7 +544,9 @@ interface CredentialApiItem {
             <Zap className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-xl font-bold text-white mt-1.5">{summary?.totalRequests ?? 0}</div>
-          <div className="text-[10px] text-primary-secondary mt-0.5">Across all models & tasks</div>
+          <div className="text-[10px] text-primary-secondary mt-0.5">
+            {selectedTask || selectedProvider ? 'Matching selected filters' : 'Across all models & tasks'}
+          </div>
         </div>
 
         <div className="bg-surface-subtle p-3.5 rounded-xl border border-border">
@@ -272,10 +555,12 @@ interface CredentialApiItem {
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-xl font-bold text-white mt-1.5">
-            {summary?.totalRequests ? `${summary.successRate}%` : '—'}
+            {summary && summary.successRate !== null ? `${summary.successRate}%` : '—'}
           </div>
           <div className="text-[10px] text-primary-secondary mt-0.5">
-            {summary?.successfulRequests ?? 0} succeeded / {summary?.failedRequests ?? 0} failed
+            {summary?.indeterminateRequests && summary.indeterminateRequests > 0
+              ? `${summary.successfulRequests} succeeded / ${summary.failedRequests} failed (${summary.indeterminateRequests} unrecorded)`
+              : `${summary?.successfulRequests ?? 0} succeeded / ${summary?.failedRequests ?? 0} failed`}
           </div>
         </div>
 
@@ -285,9 +570,9 @@ interface CredentialApiItem {
             <Clock className="w-4 h-4 text-sky-400" />
           </div>
           <div className="text-xl font-bold text-white mt-1.5">
-            {summary?.averageLatencyMs ? `${summary.averageLatencyMs}ms` : '—'}
+            {summary && summary.averageLatencyMs !== null ? `${summary.averageLatencyMs}ms` : '—'}
           </div>
-          <div className="text-[10px] text-primary-secondary mt-0.5">End-to-end execution time</div>
+          <div className="text-[10px] text-primary-secondary mt-0.5">Excludes unrecorded latencies</div>
         </div>
 
         <div className="bg-surface-subtle p-3.5 rounded-xl border border-border">
@@ -296,7 +581,7 @@ interface CredentialApiItem {
             <Layers className="w-4 h-4 text-amber-400" />
           </div>
           <div className="text-xl font-bold text-white mt-1.5">{summary?.fallbackCount ?? 0}</div>
-          <div className="text-[10px] text-primary-secondary mt-0.5">Model, credential, or provider hops</div>
+          <div className="text-[10px] text-primary-secondary mt-0.5">Logical executions requiring hops</div>
         </div>
       </div>
 
@@ -332,6 +617,19 @@ interface CredentialApiItem {
               </option>
             ))}
           </select>
+
+          {(selectedTask || selectedProvider) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedTask('');
+                setSelectedProvider('');
+              }}
+              className="text-xs text-emerald-400 hover:text-emerald-300 underline cursor-pointer ml-1"
+            >
+              Reset Filters
+            </button>
+          )}
         </div>
 
         <div className="text-xs text-primary-secondary font-mono">
@@ -341,10 +639,19 @@ interface CredentialApiItem {
 
       {/* Table Content */}
       <div className="bg-surface-subtle/30 rounded-xl border border-border overflow-hidden">
-        {error ? (
-          <div className="p-6 text-center text-xs text-red-400 flex items-center justify-center gap-2">
-            <AlertTriangle className="w-4 h-4" />
-            {error}
+        {tableError ? (
+          <div className="p-8 text-center text-xs text-red-400 space-y-2">
+            <div className="flex items-center justify-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              <span>{tableError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchHistory(null)}
+              className="px-3 py-1 rounded bg-surface-subtle border border-border text-white text-xs hover:bg-white/10 cursor-pointer"
+            >
+              Retry
+            </button>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -430,37 +737,12 @@ interface CredentialApiItem {
 
                         {/* Preferred Route Status */}
                         <td className="py-3 px-3 whitespace-nowrap">
-                          {item.preferredCredentialId ? (
-                            item.preferredRouteSkipped ? (
-                              <span
-                                title={`Skipped reason: ${item.preferredRouteSkipReason || 'UNKNOWN'}`}
-                                className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20"
-                              >
-                                Skipped ({item.preferredRouteSkipReason || 'FALLBACK'})
-                              </span>
-                            ) : (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                                Preferred Attempted
-                              </span>
-                            )
-                          ) : (
-                            <span className="text-[10px] text-primary-secondary">No Preference</span>
-                          )}
+                          {renderPreferenceBadge(item)}
                         </td>
 
                         {/* Outcome */}
                         <td className="py-3 px-3 whitespace-nowrap">
-                          {item.success ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-400">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Success
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-red-400">
-                              <XCircle className="w-3.5 h-3.5" />
-                              {item.failureCategory || 'Failed'}
-                            </span>
-                          )}
+                          {renderOutcomeBadge(item)}
                         </td>
 
                         {/* Fallback */}
@@ -489,7 +771,7 @@ interface CredentialApiItem {
 
                         {/* Latency */}
                         <td className="py-3 px-3 text-right font-mono text-[11px] text-white whitespace-nowrap">
-                          {item.latencyMs}ms
+                          {item.latencyMs ? `${Math.round(item.latencyMs)}ms` : '—'}
                         </td>
 
                         {/* Action: Trace inspect */}
@@ -561,6 +843,19 @@ interface CredentialApiItem {
           description="Detailed breakdown of model selection, quota handling, and fallback hops."
         >
           <div className="space-y-4 text-xs">
+            {/* Top Macroscopic Route Summary Banner */}
+            <div className="bg-emerald-950/20 border border-emerald-500/30 p-3 rounded-lg text-xs space-y-1">
+              <div className="font-semibold text-white flex items-center justify-between">
+                <span>Route Summary</span>
+                <span className="font-mono text-[10px] text-emerald-400">
+                  {selectedItemForTrace.traceStatus || 'TRACE_UNAVAILABLE'}
+                </span>
+              </div>
+              <p className="text-primary-secondary text-[11px]">
+                {renderFallbackNarrative(selectedItemForTrace)}
+              </p>
+            </div>
+
             {/* Metadata Summary Banner */}
             <div className="bg-[#141414] p-3 rounded-lg border border-border grid grid-cols-2 sm:grid-cols-3 gap-2.5 font-mono text-[11px]">
               <div>
@@ -569,22 +864,48 @@ interface CredentialApiItem {
               </div>
               <div>
                 <span className="text-primary-secondary block text-[10px] uppercase font-sans">Total Latency</span>
-                <span className="text-white">{selectedItemForTrace.latencyMs}ms</span>
-              </div>
-              <div>
-                <span className="text-primary-secondary block text-[10px] uppercase font-sans">Final Outcome</span>
-                <span className={selectedItemForTrace.success ? 'text-emerald-400 font-semibold' : 'text-red-400 font-semibold'}>
-                  {selectedItemForTrace.success ? 'SUCCESS' : selectedItemForTrace.failureCategory || 'FAILED'}
+                <span className="text-white">
+                  {selectedItemForTrace.latencyMs ? `${Math.round(selectedItemForTrace.latencyMs)}ms` : '—'}
                 </span>
               </div>
               <div>
-                <span className="text-primary-secondary block text-[10px] uppercase font-sans">Execution ID</span>
+                <span className="text-primary-secondary block text-[10px] uppercase font-sans">Final Outcome</span>
+                <span
+                  className={
+                    selectedItemForTrace.success
+                      ? 'text-emerald-400 font-semibold'
+                      : 'text-red-400 font-semibold'
+                  }
+                >
+                  {selectedItemForTrace.success
+                    ? 'SUCCESS'
+                    : selectedItemForTrace.failureCategory || 'FAILED'}
+                </span>
+              </div>
+              <div>
+                <span className="text-primary-secondary block text-[10px] uppercase font-sans flex items-center gap-1">
+                  Execution ID
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(selectedItemForTrace.executionId, 'execId')}
+                    className="text-primary-secondary hover:text-white"
+                  >
+                    {copiedId === 'execId' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                </span>
                 <span className="text-white/80">{selectedItemForTrace.executionId}</span>
               </div>
               {selectedItemForTrace.operationId && (
                 <div className="col-span-2">
-                  <span className="text-primary-secondary block text-[10px] uppercase font-sans">
+                  <span className="text-primary-secondary block text-[10px] uppercase font-sans flex items-center gap-1">
                     Correlated 1-Shot Operation ID
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(selectedItemForTrace.operationId!, 'opId')}
+                      className="text-primary-secondary hover:text-white"
+                    >
+                      {copiedId === 'opId' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    </button>
                   </span>
                   <span className="text-purple-300 font-semibold">{selectedItemForTrace.operationId}</span>
                 </div>
@@ -602,7 +923,9 @@ interface CredentialApiItem {
                   <span className="text-white">Preferred Credential Configured: </span>
                   {selectedItemForTrace.preferredCredentialId
                     ? getCredentialName(selectedItemForTrace.preferredCredentialId)
-                    : 'None (Default policy priority)'}
+                    : selectedItemForTrace.preferenceConfigured === false
+                    ? 'None (Default policy priority)'
+                    : 'Preference Not Recorded (Historical)'}
                 </div>
                 {selectedItemForTrace.preferredRouteSkipped && (
                   <div className="text-amber-300 flex items-center gap-1 mt-1">
@@ -616,13 +939,15 @@ interface CredentialApiItem {
               </div>
             </div>
 
-            {/* Hops Trace Sequence */}
+            {/* Hops Trace Sequence / Chronology */}
             <div>
               <h4 className="font-semibold text-white text-xs mb-2 flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5 text-emerald-400" />
-                Attempted Hops Sequence ({selectedItemForTrace.hopsCount} Hop{selectedItemForTrace.hopsCount > 1 ? 's' : ''})
+                Attempted Hops Sequence ({selectedItemForTrace.hopsCount} Hop
+                {selectedItemForTrace.hopsCount > 1 ? 's' : ''})
               </h4>
 
+              {/* Complete Multi-Hop Stepper */}
               {selectedItemForTrace.attemptedHops && selectedItemForTrace.attemptedHops.length > 0 ? (
                 <div className="space-y-2">
                   {selectedItemForTrace.attemptedHops.map((hop, idx) => (
@@ -666,10 +991,59 @@ interface CredentialApiItem {
                       </div>
                     </div>
                   ))}
+
+                  {/* If partial trace: show incomplete note */}
+                  {selectedItemForTrace.traceStatus === 'INCOMPLETE_MULTI_HOP' &&
+                    selectedItemForTrace.hopsCount > selectedItemForTrace.attemptedHops.length && (
+                      <div className="p-2.5 bg-amber-950/20 rounded-lg border border-amber-500/30 text-amber-300 text-[11px] flex items-center gap-2">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        <span>
+                          Notice: Only {selectedItemForTrace.attemptedHops.length} of{' '}
+                          {selectedItemForTrace.hopsCount} hops were captured in this historical trace.
+                        </span>
+                      </div>
+                    )}
+                </div>
+              ) : selectedItemForTrace.traceStatus === 'RECORDED_DIRECT' ? (
+                <div className="p-3 bg-[#141414] rounded-lg border border-border text-center text-primary-secondary">
+                  Single direct attempt using {selectedItemForTrace.providerUsed} ({selectedItemForTrace.modelUsed}) on{' '}
+                  {getCredentialName(selectedItemForTrace.credentialIdUsed)}.
+                </div>
+              ) : selectedItemForTrace.traceStatus === 'INCOMPLETE_MULTI_HOP' ? (
+                <div className="p-4 bg-amber-950/20 rounded-lg border border-amber-500/30 space-y-1.5 text-[11px]">
+                  <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-400" />
+                    Historical Multi-Hop Notice
+                  </div>
+                  <p className="text-primary-secondary">
+                    Detailed step-by-step trace was not captured for this execution. Aggregate recorded facts: Level{' '}
+                    {selectedItemForTrace.fallbackLevel} Fallback ({selectedItemForTrace.hopsCount} hops), resolved on{' '}
+                    <span className="text-white font-medium">
+                      {getCredentialName(selectedItemForTrace.credentialIdUsed)}
+                    </span>{' '}
+                    using {selectedItemForTrace.providerUsed} ({selectedItemForTrace.modelUsed}).
+                  </p>
+                </div>
+              ) : selectedItemForTrace.traceStatus === 'CONTRADICTORY_TELEMETRY' ? (
+                <div className="p-4 bg-rose-950/20 rounded-lg border border-rose-500/30 space-y-1.5 text-[11px]">
+                  <div className="font-semibold text-rose-300 flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-rose-400" />
+                    Telemetry Discrepancy Detected
+                  </div>
+                  <p className="text-primary-secondary">
+                    Inconsistent trace counts detected in raw record (Claimed hops: {selectedItemForTrace.hopsCount},
+                    recorded hops: {selectedItemForTrace.attemptedHops?.length ?? 0}, fallback level:{' '}
+                    {selectedItemForTrace.fallbackLevel}).
+                  </p>
                 </div>
               ) : (
-                <div className="p-3 bg-[#141414] rounded-lg border border-border text-center text-primary-secondary">
-                  Single direct attempt using {selectedItemForTrace.providerUsed} ({selectedItemForTrace.modelUsed}).
+                <div className="p-4 bg-[#141414] rounded-lg border border-border text-center text-primary-secondary space-y-1 text-[11px]">
+                  <HelpCircle className="w-4 h-4 text-slate-500 mx-auto" />
+                  <p>Detailed hop trace sequence was not recorded for this historical execution.</p>
+                  <p className="text-white/80">
+                    Landed model: {selectedItemForTrace.providerUsed} ({selectedItemForTrace.modelUsed}) on{' '}
+                    {getCredentialName(selectedItemForTrace.credentialIdUsed)}.
+                  </p>
                 </div>
               )}
             </div>
@@ -679,4 +1053,5 @@ interface CredentialApiItem {
     </div>
   );
 };
+
 export default RecentActivitiesPage;

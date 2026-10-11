@@ -94,10 +94,16 @@ class ExecutionTelemetryDTO(BaseModel):
     hopsCount: int = 1
     failureCategory: str | None = None
     costTier: CostTier = CostTier.FREE
+    preferenceConfigured: bool | None = None
     preferredCredentialId: str | None = None
     preferredRouteSkipped: bool = False
     preferredRouteSkipReason: str | None = None
-    attemptedHops: list[dict] = Field(default_factory=list)
+    preferenceStatus: str = "PREFERENCE_NOT_RECORDED"
+    executionResult: str = "INDETERMINATE_RESULT"
+    routeClassification: str = "UNKNOWN_ROUTE"
+    executionOutcome: str = "INDETERMINATE_OUTCOME"
+    traceStatus: str = "TRACE_UNAVAILABLE"
+    attemptedHops: list[dict] | None = None
     timestamp: str
 
 
@@ -107,6 +113,7 @@ class TelemetrySummaryDTO(BaseModel):
     totalRequests: int = 0
     successfulRequests: int = 0
     failedRequests: int = 0
+    indeterminateRequests: int = 0
     successRate: float = 0.0
     averageLatencyMs: float = 0.0
     fallbackCount: int = 0

@@ -120,6 +120,10 @@ class AITelemetryRepository:
         provider: str | None = None,
     ) -> dict[str, Any]:
         """Fetch paginated execution telemetry records using cursor-based pagination."""
+        from app.ai.hub.task_key_normalizer import get_task_aliases
+
+        task_aliases = get_task_aliases(task) if task else []
+
         db = self._get_db()
         if db is not None:
             try:
@@ -129,10 +133,14 @@ class AITelemetryRepository:
                     .collection("ai_telemetry")
                 )
                 query = coll_ref
-                if task:
-                    query = query.where("task", "==", task)
+                if task_aliases:
+                    if len(task_aliases) == 1:
+                        query = query.where("task", "==", task_aliases[0])
+                    else:
+                        query = query.where("task", "in", task_aliases[:10])
                 if provider:
-                    query = query.where("providerUsed", "==", provider.upper())
+                    # In Firestore, providerUsed is stored lowercase (e.g. "gemini")
+                    query = query.where("providerUsed", "==", provider.lower())
 
                 query = query.order_by("timestamp", direction="DESCENDING")
                 if cursor:
@@ -155,11 +163,11 @@ class AITelemetryRepository:
 
         # In-memory fallback
         user_records = [v for (uid, _eid), v in self._memory_telemetry.items() if uid == user_id]
-        if task:
-            user_records = [r for r in user_records if r.get("task") == task]
+        if task_aliases:
+            user_records = [r for r in user_records if r.get("task") in task_aliases]
         if provider:
             user_records = [
-                r for r in user_records if str(r.get("providerUsed", "")).upper() == provider.upper()
+                r for r in user_records if str(r.get("providerUsed", "")).lower() == provider.lower()
             ]
 
         user_records.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
@@ -183,6 +191,155 @@ class AITelemetryRepository:
             "items": items,
             "next_cursor": next_cursor,
             "has_more": has_more,
+        }
+
+    def get_telemetry_summary_aggregate(
+        self,
+        user_id: str,
+        task: str | None = None,
+        provider: str | None = None,
+    ) -> dict[str, Any]:
+        """Compute aggregated statistics across full user history using bounded-memory streaming projection."""
+        from app.ai.hub.task_key_normalizer import get_task_aliases, normalize_task_key
+        from app.ai.hub.telemetry_classifier import classify_execution_result
+
+        task_aliases = get_task_aliases(task) if task else []
+        norm_provider = provider.lower() if provider else None
+
+        total_requests = 0
+        successful_requests = 0
+        failed_requests = 0
+        indeterminate_requests = 0
+        latency_sum = 0.0
+        valid_latency_count = 0
+        fallback_count = 0
+        provider_distribution: dict[str, int] = {}
+        task_distribution: dict[str, int] = {}
+
+        db = self._get_db()
+        if db is not None:
+            try:
+                coll_ref = (
+                    db.collection("users")
+                    .document(user_id)
+                    .collection("ai_telemetry")
+                )
+                query = coll_ref
+                if task_aliases:
+                    if len(task_aliases) == 1:
+                        query = query.where("task", "==", task_aliases[0])
+                    else:
+                        query = query.where("task", "in", task_aliases[:10])
+                if norm_provider:
+                    query = query.where("providerUsed", "==", norm_provider)
+
+                # Server-side field projection strips heavy prompt/raw output data
+                query = query.select(
+                    ["success", "latencyMs", "fallbackLevel", "hopsCount", "providerUsed", "task", "attemptedHops"]
+                )
+
+                docs_stream = query.stream()
+                for doc in docs_stream:
+                    data = doc.to_dict()
+                    if not data:
+                        continue
+
+                    total_requests += 1
+
+                    # 1. Result classification
+                    result = classify_execution_result(data.get("success"), data.get("attemptedHops"))
+                    if result == "SUCCESS":
+                        successful_requests += 1
+                    elif result == "FAILURE":
+                        failed_requests += 1
+                    else:
+                        indeterminate_requests += 1
+
+                    # 2. Latency handling (strictly exclude missing/nonpositive)
+                    lat = data.get("latencyMs")
+                    if lat is not None and isinstance(lat, (int, float)) and not isinstance(lat, bool) and lat > 0:
+                        latency_sum += float(lat)
+                        valid_latency_count += 1
+
+                    # 3. Fallback count
+                    f_level = data.get("fallbackLevel")
+                    h_count = data.get("hopsCount")
+                    is_f_fallback = isinstance(f_level, int) and not isinstance(f_level, bool) and f_level > 0
+                    is_h_fallback = isinstance(h_count, int) and not isinstance(h_count, bool) and h_count > 1
+                    if is_f_fallback or is_h_fallback:
+                        fallback_count += 1
+
+                    # 4. Distributions
+                    p_key = str(data.get("providerUsed", "unknown")).lower()
+                    provider_distribution[p_key] = provider_distribution.get(p_key, 0) + 1
+
+                    t_key = normalize_task_key(str(data.get("task", "unknown")))
+                    task_distribution[t_key] = task_distribution.get(t_key, 0) + 1
+
+            except Exception as e:
+                logger.error(f"Firestore error calculating streaming summary for user {user_id}: {e}")
+                raise RuntimeError(f"Database error aggregating telemetry: {e}") from e
+        else:
+            # In-memory storage iteration
+            user_records = [v for (uid, _eid), v in self._memory_telemetry.items() if uid == user_id]
+            for data in user_records:
+                # Apply task and provider filters in memory
+                if task_aliases and data.get("task") not in task_aliases:
+                    continue
+                if norm_provider and str(data.get("providerUsed", "")).lower() != norm_provider:
+                    continue
+
+                total_requests += 1
+
+                result = classify_execution_result(data.get("success"), data.get("attemptedHops"))
+                if result == "SUCCESS":
+                    successful_requests += 1
+                elif result == "FAILURE":
+                    failed_requests += 1
+                else:
+                    indeterminate_requests += 1
+
+                lat = data.get("latencyMs")
+                if lat is not None and isinstance(lat, (int, float)) and not isinstance(lat, bool) and lat > 0:
+                    latency_sum += float(lat)
+                    valid_latency_count += 1
+
+                f_level = data.get("fallbackLevel")
+                h_count = data.get("hopsCount")
+                is_f_fallback = isinstance(f_level, int) and not isinstance(f_level, bool) and f_level > 0
+                is_h_fallback = isinstance(h_count, int) and not isinstance(h_count, bool) and h_count > 1
+                if is_f_fallback or is_h_fallback:
+                    fallback_count += 1
+
+                p_key = str(data.get("providerUsed", "unknown")).lower()
+                provider_distribution[p_key] = provider_distribution.get(p_key, 0) + 1
+
+                t_key = normalize_task_key(str(data.get("task", "unknown")))
+                task_distribution[t_key] = task_distribution.get(t_key, 0) + 1
+
+        # Denominator isolation: successRate is computed strictly over known outcomes
+        known_outcomes = successful_requests + failed_requests
+        success_rate = (
+            round((successful_requests / known_outcomes) * 100.0, 1)
+            if known_outcomes > 0
+            else 0.0
+        )
+        avg_latency = (
+            round(latency_sum / valid_latency_count, 1)
+            if valid_latency_count > 0
+            else 0.0
+        )
+
+        return {
+            "totalRequests": total_requests,
+            "successfulRequests": successful_requests,
+            "failedRequests": failed_requests,
+            "indeterminateRequests": indeterminate_requests,
+            "successRate": success_rate,
+            "averageLatencyMs": avg_latency,
+            "fallbackCount": fallback_count,
+            "providerDistribution": provider_distribution,
+            "taskDistribution": task_distribution,
         }
 
     def clear_memory(self) -> None:

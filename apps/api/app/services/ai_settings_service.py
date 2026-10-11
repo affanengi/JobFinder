@@ -456,6 +456,8 @@ class AISettingsService:
             valid_cred_ids = {c["credentialId"] for c in user_creds}
             valid_providers = {"gemini", "openrouter", "groq"}
 
+            from app.ai.hub.task_key_normalizer import normalize_task_key
+
             for task_k, target_v in request.taskRouting.items():
                 if not target_v or target_v.strip().lower() in ("auto", "none", ""):
                     continue
@@ -802,93 +804,159 @@ class AISettingsService:
                 )
         return catalog
 
-    def get_telemetry_summary(self, user_id: str, limit: int = 50) -> TelemetryResponse:
-        """Compute aggregated telemetry summary and recent executions for user."""
+    def _map_execution_record_to_dto(
+        self, r: dict[str, Any], user_id: str
+    ) -> ExecutionTelemetryDTO | None:
+        """Map raw Firestore telemetry document to canonical ExecutionTelemetryDTO."""
         try:
-            records = ai_telemetry_repo.list_executions(user_id, limit=limit)
+            from app.ai.hub.task_key_normalizer import normalize_task_key
+            from app.ai.hub.telemetry_classifier import (
+                classify_execution_result,
+                classify_preference_status,
+                classify_route_classification,
+                classify_trace_status,
+                derive_composite_execution_outcome,
+            )
+
+            task_raw = str(r.get("task", ""))
+            norm_task = normalize_task_key(task_raw)
+            try:
+                task_enum = AITaskType(norm_task)
+            except ValueError:
+                task_enum = AITaskType.JOB_INGESTION
+
+            provider_raw = str(r.get("providerUsed", "")).lower()
+            try:
+                provider_enum = ProviderType(provider_raw)
+            except ValueError:
+                provider_enum = ProviderType.GEMINI
+
+            cost_raw = str(r.get("costTier", CostTier.FREE.value))
+            try:
+                cost_enum = CostTier(cost_raw)
+            except ValueError:
+                cost_enum = CostTier.FREE
+
+            hops_count_raw = r.get("hopsCount")
+            fallback_level_raw = r.get("fallbackLevel")
+            attempted_hops_raw = r.get("attemptedHops")
+            # Strictly preserve None when unrecorded in document
+            attempted_hops = attempted_hops_raw if isinstance(attempted_hops_raw, list) else None
+
+            trace_status = classify_trace_status(
+                hops_count=hops_count_raw,
+                fallback_level=fallback_level_raw,
+                attempted_hops=attempted_hops,
+            )
+
+            pref_status = classify_preference_status(
+                pref_conf=r.get("preferenceConfigured"),
+                pref_id=r.get("preferredCredentialId"),
+                pref_skip=r.get("preferredRouteSkipped"),
+                pref_reason=r.get("preferredRouteSkipReason"),
+                hops=attempted_hops,
+            )
+
+            success_raw = r.get("success")
+            exec_result = classify_execution_result(success=success_raw, hops=attempted_hops)
+            route_class = classify_route_classification(
+                hops_count=hops_count_raw,
+                fallback_level=fallback_level_raw,
+                hops=attempted_hops,
+                trace_status=trace_status,
+            )
+            exec_outcome = derive_composite_execution_outcome(result=exec_result, route=route_class)
+
+            lat_raw = r.get("latencyMs", 0.0)
+            latency_val = (
+                float(lat_raw)
+                if isinstance(lat_raw, (int, float)) and not isinstance(lat_raw, bool)
+                else 0.0
+            )
+
+            h_count_val = (
+                hops_count_raw
+                if isinstance(hops_count_raw, int) and not isinstance(hops_count_raw, bool) and hops_count_raw >= 0
+                else 1
+            )
+            f_level_val = (
+                fallback_level_raw
+                if isinstance(fallback_level_raw, int) and not isinstance(fallback_level_raw, bool) and fallback_level_raw >= 0
+                else 0
+            )
+
+            pref_conf_val = (
+                r.get("preferenceConfigured")
+                if isinstance(r.get("preferenceConfigured"), bool)
+                else None
+            )
+
+            return ExecutionTelemetryDTO(
+                executionId=str(r.get("executionId", "")),
+                userId=user_id,
+                operationId=r.get("operationId"),
+                task=task_enum,
+                providerUsed=provider_enum,
+                modelUsed=str(r.get("modelUsed", "")),
+                credentialIdUsed=str(r.get("credentialIdUsed", "")),
+                success=success_raw if isinstance(success_raw, bool) else False,
+                latencyMs=latency_val,
+                fallbackLevel=f_level_val,
+                hopsCount=h_count_val,
+                failureCategory=r.get("failureCategory"),
+                costTier=cost_enum,
+                preferenceConfigured=pref_conf_val,
+                preferredCredentialId=r.get("preferredCredentialId"),
+                preferredRouteSkipped=bool(r.get("preferredRouteSkipped", False)),
+                preferredRouteSkipReason=r.get("preferredRouteSkipReason"),
+                preferenceStatus=pref_status,
+                executionResult=exec_result,
+                routeClassification=route_class,
+                executionOutcome=exec_outcome,
+                traceStatus=trace_status,
+                attemptedHops=attempted_hops,
+                timestamp=str(r.get("timestamp", "")),
+            )
+        except Exception as parse_err:
+            logger.debug(f"Skipping malformed telemetry record: {parse_err}")
+            return None
+
+    def get_telemetry_summary(
+        self,
+        user_id: str,
+        limit: int = 50,
+        task: str | None = None,
+        provider: str | None = None,
+    ) -> TelemetryResponse:
+        """Compute aggregated telemetry summary across full user history and recent executions."""
+        try:
+            summary_dict = ai_telemetry_repo.get_telemetry_summary_aggregate(
+                user_id=user_id,
+                task=task,
+                provider=provider,
+            )
+            summary = TelemetrySummaryDTO(**summary_dict)
         except Exception as e:
-            logger.error(f"Failed to query telemetry for user {user_id}: {e}")
+            logger.error(f"Failed to calculate aggregate telemetry summary for user {user_id}: {e}")
+            summary = TelemetrySummaryDTO()
+
+        try:
+            res = ai_telemetry_repo.list_executions_paginated(
+                user_id=user_id,
+                limit=limit,
+                task=task,
+                provider=provider,
+            )
+            records = res.get("items", [])
+        except Exception as e:
+            logger.error(f"Failed to query recent telemetry for user {user_id}: {e}")
             records = []
-
-        total = len(records)
-        successful = sum(1 for r in records if r.get("success", False))
-        failed = total - successful
-        success_rate = round((successful / total) * 100.0, 1) if total > 0 else 0.0
-        avg_latency = (
-            round(sum(float(r.get("latencyMs", 0.0)) for r in records) / total, 1)
-            if total > 0
-            else 0.0
-        )
-        fallbacks = sum(
-            1
-            for r in records
-            if int(r.get("fallbackLevel", 0)) > 0 or int(r.get("hopsCount", 1)) > 1
-        )
-
-        provider_dist: dict[str, int] = {}
-        task_dist: dict[str, int] = {}
-        for r in records:
-            p = str(r.get("providerUsed", "unknown"))
-            t = str(r.get("task", "unknown"))
-            provider_dist[p] = provider_dist.get(p, 0) + 1
-            task_dist[t] = task_dist.get(t, 0) + 1
-
-        summary = TelemetrySummaryDTO(
-            totalRequests=total,
-            successfulRequests=successful,
-            failedRequests=failed,
-            successRate=success_rate,
-            averageLatencyMs=avg_latency,
-            fallbackCount=fallbacks,
-            providerDistribution=provider_dist,
-            taskDistribution=task_dist,
-        )
 
         recent: list[ExecutionTelemetryDTO] = []
         for r in records:
-            try:
-                task_raw = str(r.get("task", ""))
-                try:
-                    task_enum = AITaskType(task_raw)
-                except ValueError:
-                    task_enum = AITaskType.JOB_INGESTION
-
-                provider_raw = str(r.get("providerUsed", ""))
-                try:
-                    provider_enum = ProviderType(provider_raw)
-                except ValueError:
-                    provider_enum = ProviderType.GEMINI
-
-                cost_raw = str(r.get("costTier", CostTier.FREE.value))
-                try:
-                    cost_enum = CostTier(cost_raw)
-                except ValueError:
-                    cost_enum = CostTier.FREE
-
-                recent.append(
-                    ExecutionTelemetryDTO(
-                        executionId=str(r.get("executionId", "")),
-                        userId=user_id,
-                        operationId=r.get("operationId"),
-                        task=task_enum,
-                        providerUsed=provider_enum,
-                        modelUsed=str(r.get("modelUsed", "")),
-                        credentialIdUsed=str(r.get("credentialIdUsed", "")),
-                        success=bool(r.get("success", False)),
-                        latencyMs=float(r.get("latencyMs", 0.0)),
-                        fallbackLevel=int(r.get("fallbackLevel", 0)),
-                        hopsCount=int(r.get("hopsCount", 1)),
-                        failureCategory=r.get("failureCategory"),
-                        costTier=cost_enum,
-                        preferredCredentialId=r.get("preferredCredentialId"),
-                        preferredRouteSkipped=bool(r.get("preferredRouteSkipped", False)),
-                        preferredRouteSkipReason=r.get("preferredRouteSkipReason"),
-                        attemptedHops=r.get("attemptedHops", []),
-                        timestamp=str(r.get("timestamp", "")),
-                    )
-                )
-            except Exception as parse_err:
-                logger.debug(f"Skipping malformed telemetry record: {parse_err}")
+            dto = self._map_execution_record_to_dto(r, user_id)
+            if dto:
+                recent.append(dto)
 
         return TelemetryResponse(
             summary=summary,
@@ -915,49 +983,9 @@ class AISettingsService:
 
         items: list[ExecutionTelemetryDTO] = []
         for r in res.get("items", []):
-            try:
-                task_raw = str(r.get("task", ""))
-                try:
-                    task_enum = AITaskType(task_raw)
-                except ValueError:
-                    task_enum = AITaskType.JOB_INGESTION
-
-                provider_raw = str(r.get("providerUsed", ""))
-                try:
-                    provider_enum = ProviderType(provider_raw)
-                except ValueError:
-                    provider_enum = ProviderType.GEMINI
-
-                cost_raw = str(r.get("costTier", CostTier.FREE.value))
-                try:
-                    cost_enum = CostTier(cost_raw)
-                except ValueError:
-                    cost_enum = CostTier.FREE
-
-                items.append(
-                    ExecutionTelemetryDTO(
-                        executionId=str(r.get("executionId", "")),
-                        userId=user_id,
-                        operationId=r.get("operationId"),
-                        task=task_enum,
-                        providerUsed=provider_enum,
-                        modelUsed=str(r.get("modelUsed", "")),
-                        credentialIdUsed=str(r.get("credentialIdUsed", "")),
-                        success=bool(r.get("success", False)),
-                        latencyMs=float(r.get("latencyMs", 0.0)),
-                        fallbackLevel=int(r.get("fallbackLevel", 0)),
-                        hopsCount=int(r.get("hopsCount", 1)),
-                        failureCategory=r.get("failureCategory"),
-                        costTier=cost_enum,
-                        preferredCredentialId=r.get("preferredCredentialId"),
-                        preferredRouteSkipped=bool(r.get("preferredRouteSkipped", False)),
-                        preferredRouteSkipReason=r.get("preferredRouteSkipReason"),
-                        attemptedHops=r.get("attemptedHops", []),
-                        timestamp=str(r.get("timestamp", "")),
-                    )
-                )
-            except Exception as parse_err:
-                logger.debug(f"Skipping malformed telemetry record in history: {parse_err}")
+            dto = self._map_execution_record_to_dto(r, user_id)
+            if dto:
+                items.append(dto)
 
         return PaginatedTelemetryResponse(
             items=items,

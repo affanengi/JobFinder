@@ -42,6 +42,16 @@ const getFriendlyCredentialName = (cred: CredentialItem, index: number): string 
   return `Key ${index + 1}`
 }
 
+const getTaskRouteTarget = (routing: Record<string, string>, taskKey: string): string | undefined => {
+  if (!routing) return undefined
+  if (routing[taskKey]) return routing[taskKey]
+  if (taskKey === 'resume_generation' && routing['resume_tailoring']) return routing['resume_tailoring']
+  if (taskKey === 'resume_tailoring' && routing['resume_generation']) return routing['resume_generation']
+  if (taskKey === 'cover_letter_generation' && routing['cover_letter_gen']) return routing['cover_letter_gen']
+  if (taskKey === 'cover_letter_gen' && routing['cover_letter_generation']) return routing['cover_letter_generation']
+  return undefined
+}
+
 export interface TaskDefinition {
   key: string
   name: string
@@ -271,7 +281,7 @@ export const TaskRoutingMapEditor: React.FC<TaskRoutingMapEditorProps> = ({
     }> = []
 
     TASK_DEFINITIONS.forEach((task) => {
-      const targetId = taskRouting[task.key]
+      const targetId = getTaskRouteTarget(taskRouting, task.key)
       if (!targetId || targetId.toLowerCase() === 'auto' || targetId.trim() === '') return
 
       // Check if target is a provider
@@ -682,14 +692,14 @@ export const TaskRoutingMapEditor: React.FC<TaskRoutingMapEditorProps> = ({
             </div>
 
             {TASK_DEFINITIONS.map((task) => {
-              const currentPref = taskRouting[task.key]
+              const currentPref = getTaskRouteTarget(taskRouting, task.key)
               const isConnecting = activeConnectingTask === task.key || dragSourceTask === task.key
               const isRouteActive = currentPref && currentPref !== 'auto' && currentPref.trim() !== ''
               const Icon = task.icon
 
               // Find target info
               let targetLabel = 'Auto'
-              if (isRouteActive) {
+              if (isRouteActive && currentPref) {
                 const prov = PROVIDERS_INFO.find((p) => p.id === currentPref.toLowerCase())
                 if (prov) {
                   targetLabel = prov.shortName
@@ -1028,7 +1038,7 @@ export const TaskRoutingMapEditor: React.FC<TaskRoutingMapEditorProps> = ({
       {viewingTaskKey && (() => {
         const task = TASK_DEFINITIONS.find((t) => t.key === viewingTaskKey)
         if (!task) return null
-        const currentPref = taskRouting[task.key]
+        const currentPref = getTaskRouteTarget(taskRouting, task.key)
         const isRouteConfigured = Boolean(currentPref && currentPref !== 'auto' && currentPref.trim() !== '')
         const Icon = task.icon
 
@@ -1036,7 +1046,7 @@ export const TaskRoutingMapEditor: React.FC<TaskRoutingMapEditorProps> = ({
         let prefTargetType = 'Automated Smart Selection'
         let prefProviderName = 'All Configured Providers'
 
-        if (isRouteConfigured) {
+        if (isRouteConfigured && currentPref) {
           const prov = PROVIDERS_INFO.find((p) => p.id === currentPref.toLowerCase())
           if (prov) {
             prefTargetName = prov.name
@@ -1141,7 +1151,7 @@ export const TaskRoutingMapEditor: React.FC<TaskRoutingMapEditorProps> = ({
       {/* 2. PREFERRED ROUTE MODAL (CLICKING CONNECTION LINE) */}
       {selectedRouteTask && (() => {
         const task = TASK_DEFINITIONS.find((t) => t.key === selectedRouteTask)
-        const targetId = taskRouting[selectedRouteTask]
+        const targetId = getTaskRouteTarget(taskRouting, selectedRouteTask)
         let targetTitle = 'Auto (Priority Chain)'
         let targetType = 'Auto Fallback'
         let providerName = 'All Configured'

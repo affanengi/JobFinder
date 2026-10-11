@@ -186,9 +186,16 @@ async def get_models(
 )
 async def get_telemetry(
     limit: int = 50,
+    task: str | None = None,
+    provider: str | None = None,
     user_id: str = Depends(get_authenticated_user_id),
 ) -> TelemetryResponse:
-    return ai_settings_service.get_telemetry_summary(user_id, limit=min(limit, 100))
+    return ai_settings_service.get_telemetry_summary(
+        user_id=user_id,
+        limit=min(limit, 100),
+        task=task,
+        provider=provider,
+    )
 
 
 @router.get(

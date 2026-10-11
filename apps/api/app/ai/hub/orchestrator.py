@@ -229,6 +229,7 @@ class AIOrchestrator:
                     "hopsCount": hops_count,
                     "failureCategory": failure_category,
                     "costTier": cost_tier,
+                    "preferenceConfigured": preferred_credential_id is not None,
                     "preferredCredentialId": preferred_credential_id,
                     "preferredRouteSkipped": preferred_route_skipped,
                     "preferredRouteSkipReason": preferred_route_skip_reason,
