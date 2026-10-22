@@ -12,7 +12,7 @@ import io
 import re
 import uuid
 import logging
-from typing import Dict, List, Any, Optional, Tuple, Literal
+from typing import Dict, List, Any, Optional, Tuple, Literal, Union
 from pydantic import BaseModel
 
 import pypdf
@@ -204,7 +204,7 @@ class AtsScannerEngine:
     def scan_tailored_resume(
         self,
         resume_data: Dict[str, Any],
-        job_data: Optional[Dict[str, Any]] = None
+        job_data: Optional[Union[Dict[str, Any], str]] = None
     ) -> AtsScanResult:
         """
         Execute deterministic 100-point ATS scan on a structured tailored resume.

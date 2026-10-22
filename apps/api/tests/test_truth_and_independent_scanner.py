@@ -415,7 +415,8 @@ def test_m_ats_scanner_pillar_3_diminishing_returns():
         ],
         "education": []
     }
-    scan_0 = ats_scanner_engine.scan_tailored_resume(res_0_metrics, "FastAPI and React developer")
+    job_target = {"title": "FastAPI and React developer", "description": "FastAPI and React developer"}
+    scan_0 = ats_scanner_engine.scan_tailored_resume(res_0_metrics, job_target)
     p3_0 = scan_0.category_scores.get("impact_action") or next(p for p in scan_0.category_scores.values() if "Impact" in p.name)
     metric_check_0 = next(c for c in p3_0.checks if "Quantified" in c.name)
     assert metric_check_0.score == 5.0  # solid baseline
@@ -437,7 +438,7 @@ def test_m_ats_scanner_pillar_3_diminishing_returns():
         ],
         "education": []
     }
-    scan_3 = ats_scanner_engine.scan_tailored_resume(res_3_metrics, "FastAPI and React developer")
+    scan_3 = ats_scanner_engine.scan_tailored_resume(res_3_metrics, job_target)
     p3_3 = scan_3.category_scores.get("impact_action") or next(p for p in scan_3.category_scores.values() if "Impact" in p.name)
     metric_check_3 = next(c for c in p3_3.checks if "Quantified" in c.name)
     assert metric_check_3.score == 9.0  # strong diminishing returns score
