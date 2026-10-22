@@ -267,6 +267,7 @@ class AtsEvidenceAuditorService:
             atsScore=ats_score,
             truthIntegrityStatus=truth_status,
             items=items,
+            evidenceAudit=items,
             keywordMatches=list(set(keyword_matches)),
             evidenceMatches=list(set(evidence_matches)),
             omittedOpportunities=list(set(omitted_opportunities)),

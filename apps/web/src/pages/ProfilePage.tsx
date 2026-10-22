@@ -17,9 +17,11 @@ import {
   Plus,
   Pencil,
   Award,
-  Users
+  Users,
+  BarChart2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useSync } from '../context/SyncContext';
 import { fetchWithAuth } from '../lib/api';
 import { EditProfileModal, UserProfileDTO } from '../components/profile/EditProfileModal';
 import { EditEducationModal, EducationFact } from '../components/profile/EditEducationModal';
@@ -29,6 +31,8 @@ import { EditSkillModal, SkillFact } from '../components/profile/EditSkillModal'
 import { EditCourseModal, CourseCertificationFact } from '../components/profile/EditCourseModal';
 import { Search } from 'lucide-react';
 import { DeleteConfirmModal } from '../components/ui/DeleteConfirmModal';
+import { AuthRequiredEmptyState } from '../components/common/AuthRequiredEmptyState';
+import { AuthModal } from '../components/auth/AuthModal';
 
 interface PersonalLinks {
   github?: string;
@@ -69,6 +73,7 @@ interface DeleteTarget {
 
 export const ProfilePage: React.FC = () => {
   const { user } = useAuth();
+  const { recordPersistenceSuccess, recordPersistenceFailure } = useSync();
   const [profile, setProfile] = useState<ProfileDTO | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
@@ -100,6 +105,11 @@ export const ProfilePage: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [authModalConfig, setAuthModalConfig] = useState<{
+    isOpen: boolean;
+    title?: string;
+    subtitle?: string;
+  }>({ isOpen: false });
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -107,18 +117,49 @@ export const ProfilePage: React.FC = () => {
   };
 
   const fetchProfile = async () => {
+    if (!user) {
+      setProfile(null);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     try {
       const res = await fetchWithAuth('/api/v1/profile');
       if (res.ok) {
         const data: ProfileDTO = await res.json();
         setProfile(data);
+      } else {
+        setProfile(null);
       }
     } catch (err) {
       console.error('Failed to load profile:', err);
+      setProfile(null);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleUploadClick = (e: React.MouseEvent) => {
+    if (!user) {
+      e.preventDefault();
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Upload Resume',
+        subtitle: 'An authenticated account is required to extract and save verified career facts to your Master Profile.',
+      });
+    }
+  };
+
+  const handleEditProfileClick = () => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Edit Profile',
+        subtitle: 'Sign in to create, update, and manage your verified career facts.',
+      });
+      return;
+    }
+    setIsEditModalOpen(true);
   };
 
   useEffect(() => {
@@ -135,12 +176,15 @@ export const ProfilePage: React.FC = () => {
       });
 
       if (res.ok) {
+        recordPersistenceSuccess('Master Profile');
         showToast(successMsg);
       } else {
+        recordPersistenceFailure('Master Profile', 'Error syncing updates to Firestore.');
         showToast('Error syncing updates to Firestore.');
       }
     } catch (err) {
       console.error('Failed to sync profile update:', err);
+      recordPersistenceFailure('Master Profile', 'Network error during profile sync.');
       showToast('Error syncing updates to Firestore.');
     }
   };
@@ -405,6 +449,43 @@ export const ProfilePage: React.FC = () => {
     }
   };
 
+  // Aggregate verified quantitative facts across projects and experiences for grounding evidence
+  const verifiedMetrics: Array<{ entity: string; metric: string; value: string; context: string }> = [];
+
+  if (profile?.experience) {
+    for (const exp of profile.experience) {
+      if ((exp as any).metrics && Array.isArray((exp as any).metrics)) {
+        for (const m of (exp as any).metrics) {
+          if (typeof m === 'object' && m.metric) {
+            verifiedMetrics.push({
+              entity: `${exp.title} (${exp.company})`,
+              metric: m.metric,
+              value: m.value,
+              context: m.context || '',
+            });
+          }
+        }
+      }
+    }
+  }
+
+  if (profile?.projects) {
+    for (const proj of profile.projects) {
+      if ((proj as any).metrics && Array.isArray((proj as any).metrics)) {
+        for (const m of (proj as any).metrics) {
+          if (typeof m === 'object' && m.metric) {
+            verifiedMetrics.push({
+              entity: proj.name,
+              metric: m.metric,
+              value: m.value,
+              context: m.context || '',
+            });
+          }
+        }
+      }
+    }
+  }
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto p-4 md:p-6 animate-in fade-in duration-200">
       
@@ -432,20 +513,33 @@ export const ProfilePage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <label className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#222222] hover:bg-neutral-700 border border-white/20 text-white text-xs font-semibold cursor-pointer transition-colors shadow-sm">
-            {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-            <span>{isUploading ? 'Extracting Facts...' : 'Upload General Resume'}</span>
-            <input
-              type="file"
-              accept=".pdf,.docx,.txt"
-              onChange={handleFileUpload}
-              className="hidden"
-              disabled={isUploading}
-            />
-          </label>
+          {!user ? (
+            <button
+              type="button"
+              onClick={handleUploadClick}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#222222] hover:bg-neutral-700 border border-white/20 text-white text-xs font-semibold cursor-pointer transition-colors shadow-sm"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Upload General Resume</span>
+            </button>
+          ) : (
+            <label
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#222222] hover:bg-neutral-700 border border-white/20 text-white text-xs font-semibold cursor-pointer transition-colors shadow-sm"
+            >
+              {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+              <span>{isUploading ? 'Extracting Facts...' : 'Upload General Resume'}</span>
+              <input
+                type="file"
+                accept=".pdf,.docx,.txt"
+                onChange={handleFileUpload}
+                className="hidden"
+                disabled={isUploading}
+              />
+            </label>
+          )}
 
           <button
-            onClick={() => setIsEditModalOpen(true)}
+            onClick={handleEditProfileClick}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-black text-xs font-bold hover:bg-neutral-200 transition-colors cursor-pointer shadow-sm"
           >
             <Edit3 className="w-3.5 h-3.5" />
@@ -453,6 +547,52 @@ export const ProfilePage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Provenance Banner (Consolidated from Memory & Facts) */}
+      <div className="bg-[#161616] border border-emerald-500/30 rounded-2xl p-4 flex items-center gap-3.5 shadow-sm">
+        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+          <ShieldCheck className="w-5 h-5" />
+        </div>
+        <div className="text-xs">
+          <div className="font-semibold text-white flex items-center gap-2">
+            Deterministic Grounding Active
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium font-mono">
+              Sole Canonical Truth
+            </span>
+          </div>
+          <p className="text-[#A3A3A3] mt-0.5 text-[11px] leading-relaxed">
+            Every resume claim, cover letter, and ATS optimization is deterministically validated against these confirmed profile records. Unverified metrics or unsupported employers are strictly blocked from AI fabrication.
+          </p>
+        </div>
+      </div>
+
+      {/* Verified Quantitative Evidence Ribbon */}
+      {verifiedMetrics.length > 0 && (
+        <div className="bg-[#161616] border border-white/20 rounded-2xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-mono uppercase text-white tracking-wider flex items-center gap-2">
+              <BarChart2 className="w-4 h-4 text-emerald-400" />
+              Verified Quantitative Evidence ({verifiedMetrics.length})
+            </h3>
+            <span className="text-[11px] font-mono text-emerald-400">Directly Grounded in Profile Facts</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {verifiedMetrics.map((item, idx) => (
+              <div key={idx} className="bg-[#0D0D0D] p-3.5 rounded-xl border border-white/10 hover:border-emerald-500/30 transition-colors space-y-1.5">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-[10px] font-mono font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30">
+                    {item.metric}
+                  </span>
+                  <span className="text-xs font-bold text-white tabular-nums">{item.value}</span>
+                </div>
+                <div className="text-xs font-medium text-white truncate">{item.entity}</div>
+                {item.context && <div className="text-[11px] text-[#A3A3A3] leading-relaxed line-clamp-2">{item.context}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="py-24 flex flex-col items-center justify-center space-y-3">
@@ -1054,6 +1194,22 @@ export const ProfilePage: React.FC = () => {
 
           </div>
         </div>
+      ) : !user ? (
+        <AuthRequiredEmptyState
+          icon={ShieldCheck}
+          badge="Verified Ground Truth"
+          title="Sign In to Build Your Verified Master Profile"
+          description="Build and maintain your single source of career truth. JobFinder grounds every tailored resume and cover letter exclusively in your verified career facts with zero AI hallucinations."
+          benefits={[
+            "Tamper-proof career facts repository (education, experience, verified skills, and projects)",
+            "Deterministic grounding prevents LLM hallucinations and fabricated candidate claims",
+            "Automatic synchronization with 100-Point ATS Resume Tailoring and Application Tracking",
+            "One-click PDF/DOCX resume fact extraction upon sign-in"
+          ]}
+          primaryActionText="Sign In / Create Account"
+          authModalTitle="Sign in to Build Your Verified Profile"
+          authModalSubtitle="Maintain authoritative career facts for zero-hallucination resume tailoring."
+        />
       ) : (
         <div className="py-20 flex flex-col items-center justify-center space-y-4 text-center">
           <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400">
@@ -1135,6 +1291,14 @@ export const ProfilePage: React.FC = () => {
           onClose={() => setDeleteTarget(null)}
         />
       )}
+
+      {/* Guest Contextual Auth Modal */}
+      <AuthModal
+        isOpen={authModalConfig.isOpen}
+        onClose={() => setAuthModalConfig({ isOpen: false })}
+        title={authModalConfig.title}
+        subtitle={authModalConfig.subtitle}
+      />
     </div>
   );
 };

@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RecentActivitiesPage } from './RecentActivitiesPage';
+import { AuthProvider, mockTestUser } from '../context/AuthContext';
 
 vi.mock('../lib/api', () => ({
   fetchWithAuth: vi.fn(),
@@ -197,8 +198,15 @@ describe('RecentActivitiesPage', () => {
     });
   });
 
+  const renderPage = (user: any = mockTestUser) =>
+    render(
+      <AuthProvider initialUser={user}>
+        <RecentActivitiesPage />
+      </AuthProvider>
+    );
+
   it('unboxes summary metrics and renders cards with non-zero values', async () => {
-    render(<RecentActivitiesPage />);
+    renderPage();
 
     // Metric cards must display non-zero unboxed values
     await waitFor(() => {
@@ -210,7 +218,7 @@ describe('RecentActivitiesPage', () => {
   });
 
   it('renders preference and outcome badges accurately', async () => {
-    render(<RecentActivitiesPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('resume_tailoring')).toBeInTheDocument();
@@ -227,7 +235,7 @@ describe('RecentActivitiesPage', () => {
   });
 
   it('supports cursor pagination navigation and casing compatibility', async () => {
-    render(<RecentActivitiesPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('resume_tailoring')).toBeInTheDocument();
@@ -258,7 +266,7 @@ describe('RecentActivitiesPage', () => {
   });
 
   it('propagates filter changes to BOTH summary and history endpoints', async () => {
-    render(<RecentActivitiesPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('resume_tailoring')).toBeInTheDocument();
@@ -293,7 +301,7 @@ describe('RecentActivitiesPage', () => {
   });
 
   it('opens Trace Modal for multi-hop execution showing step sequence and route summary banner', async () => {
-    render(<RecentActivitiesPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('cover_letter_gen')).toBeInTheDocument();
@@ -312,7 +320,7 @@ describe('RecentActivitiesPage', () => {
   });
 
   it('shows Historical Multi-Hop Notice for multi-hop records with missing hop lists', async () => {
-    render(<RecentActivitiesPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByText('resume_generation')).toBeInTheDocument();
@@ -330,5 +338,22 @@ describe('RecentActivitiesPage', () => {
       // Must NOT show "Single direct attempt using..."
       expect(screen.queryByText(/Single direct attempt using/i)).not.toBeInTheDocument();
     });
+  });
+
+  it('suppresses protected telemetry requests and displays AuthRequiredEmptyState for guests', async () => {
+    renderPage(null);
+
+    // Verify protected endpoints are NOT called
+    expect(fetchWithAuth).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/ai/credentials'));
+    expect(fetchWithAuth).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/ai/telemetry/history'));
+    expect(fetchWithAuth).not.toHaveBeenCalledWith(expect.stringContaining('/api/v1/ai/telemetry/summary'));
+
+    // Verify empty state is displayed
+    expect(await screen.findByText('Sign In to View Recent AI Activities')).toBeInTheDocument();
+    expect(screen.getByText('AI Auditing & Observability')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sign In \/ Create Account/i })).toBeInTheDocument();
+
+    // Verify Refresh button is not rendered for guests
+    expect(screen.queryByRole('button', { name: /Refresh/i })).not.toBeInTheDocument();
   });
 });

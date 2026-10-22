@@ -9,6 +9,7 @@ import {
   onAuthStateChanged, 
   User 
 } from '../lib/firebase';
+import { abortAllRequests } from '../lib/api';
 
 interface AuthContextType {
   user: User | null;
@@ -22,12 +23,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [token, setToken] = useState<string | null>(null);
+export const AuthProvider: React.FC<{ children: React.ReactNode; initialUser?: User | null }> = ({ children, initialUser }) => {
+  const [user, setUser] = useState<User | null>(initialUser !== undefined ? initialUser : null);
+  const [loading, setLoading] = useState(initialUser === undefined);
+  const [token, setToken] = useState<string | null>(initialUser ? 'mock-id-token' : null);
 
   useEffect(() => {
+    if (initialUser !== undefined) {
+      setUser(initialUser);
+      setLoading(false);
+      return;
+    }
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
@@ -45,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [initialUser]);
 
   const loginWithGoogle = async () => {
     try {
@@ -76,6 +82,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
+      // 1. Immediately abort all in-flight API requests to prevent stale responses from overwriting state
+      abortAllRequests();
+
+      // 2. Clear sensitive in-memory auth state
+      setUser(null);
+      setToken(null);
+
+      // 3. Dispatch global logout event for component state clearing
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('jobfinder:logout'));
+      }
+
+      // 4. Execute Firebase sign-out
       await fbSignOut(auth);
     } catch (err) {
       console.error('Sign-Out failed:', err);
@@ -100,10 +119,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
+export const mockTestUser: User = {
+  uid: 'user_default',
+  email: 'affan@example.com',
+  displayName: 'Mohammed Affan Razvi',
+  getIdToken: async () => 'mock-id-token',
+} as unknown as User;
+
+const defaultAuthContext: AuthContextType = {
+  user: null,
+  loading: false,
+  token: null,
+  loginWithGoogle: async () => {},
+  loginWithEmail: async () => {},
+  signupWithEmail: async () => {},
+  logout: async () => {},
+};
+
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    return defaultAuthContext;
   }
   return context;
 };

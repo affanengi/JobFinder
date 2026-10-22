@@ -25,16 +25,46 @@ class MatchingEngineService:
         s = s.replace("nodejs", "node").replace("reactjs", "react").replace("nextjs", "next")
         return s
 
+    def is_profile_usable(self, profile: Profile | None) -> bool:
+        """Check if profile has sufficient verified career evidence for matching.
+        
+        Requires at least one skill, experience fact, or project fact.
+        """
+        if not profile:
+            return False
+        has_skills = bool(profile.skills and len(profile.skills) > 0)
+        has_experience = bool(profile.experience and len(profile.experience) > 0)
+        has_projects = bool(profile.projects and len(profile.projects) > 0)
+        return has_skills or has_experience or has_projects
+
     def evaluate_skills_overlap(
         self,
         job_skills: list[str],
         verified_skills: list[str],
+        job_title: str = "",
+        job_description: str = "",
     ) -> tuple[list[str], list[str], float]:
-        """Compute verified matched skills, missing skills, and skill fit score."""
-        if not job_skills:
-            return verified_skills[:3], [], 85.0
+        """Compute verified matched skills, missing skills, and skill fit score without treating missing data as match evidence."""
+        if not verified_skills:
+            return [], job_skills[:3], 25.0
 
         verified_map = {self._normalize_skill_string(s): s for s in verified_skills}
+
+        if not job_skills:
+            # Job posting did not specify required skills.
+            # CRITICAL: Do NOT blindly award 85% match score.
+            # Scan title and description for verified candidate skills.
+            corpus = f"{job_title} {job_description}".lower()
+            matched_from_text = [
+                orig_s for norm_s, orig_s in verified_map.items()
+                if norm_s and (norm_s in corpus or any(word in corpus for word in norm_s.split()))
+            ]
+            if matched_from_text:
+                score = min(65.0, 45.0 + len(matched_from_text) * 5.0)
+                return matched_from_text[:3], [], score
+            else:
+                return [], [], 35.0
+
         matched: list[str] = []
         missing: list[str] = []
 
@@ -60,15 +90,20 @@ class MatchingEngineService:
     def compute_fit_score(
         self,
         job: CanonicalJob,
-        profile: Profile,
-    ) -> tuple[int, MatchTier, list[str], list[str]]:
+        profile: Profile | None,
+    ) -> tuple[int | None, MatchTier, list[str], list[str]]:
         """Calculate calibrated fit score with user-defined experience penalties for freshers."""
+        if profile is None or not self.is_profile_usable(profile):
+            if profile is None:
+                return None, "Unscored", [], []
+            return None, "Unscored", [], job.requiredSkills[:3]
+
         verified_skill_names = [s.name for s in profile.skills if s.verified]
         if not verified_skill_names:
             verified_skill_names = [s.name for s in profile.skills]
 
         matched, missing, skills_score = self.evaluate_skills_overlap(
-            job.requiredSkills, verified_skill_names
+            job.requiredSkills, verified_skill_names, job.title, job.description
         )
 
         # Title leadership & senior level check
@@ -154,9 +189,15 @@ class MatchingEngineService:
         job: CanonicalJob,
         matched_skills: list[str],
         missing_skills: list[str],
-        fit_score: int,
+        fit_score: int | None,
+        is_guest: bool = False,
     ) -> str:
         """Deterministic, grounded explanation strictly using verified facts (Zero Token Cost)."""
+        if is_guest or fit_score is None:
+            if is_guest:
+                return "Sign in and complete your Master Profile to calculate your personalized fit score and skill matches."
+            return "Profile incomplete: Add your verified skills, experience, or projects in Master Profile to calculate match intelligence."
+
         exp_years = job.experienceYearsRequired or 0.0
         title_lower = job.title.lower()
         is_leadership = any(
@@ -186,19 +227,19 @@ class MatchingEngineService:
         profile: Profile | None = None,
     ) -> ScoredJobOpportunity | None:
         """Score a single job against profile after hard filter validation."""
-        user_profile = profile or profile_service.get_profile()
-
         # 1. Hard Exclusion Filters (Location: India/Remote, Language: English)
-        passes, reason = self.filters.passes_hard_filters(job, user_profile)
+        passes, reason = self.filters.passes_hard_filters(job, profile)
         if not passes:
             logger.info(f"Filtered out '{job.title}' ({job.location}): {reason}")
             return None
 
         # 2. Compute Fit Score
-        fit_score, tier, matched, missing = self.compute_fit_score(job, user_profile)
+        fit_score, tier, matched, missing = self.compute_fit_score(job, profile)
 
         # 3. Deterministic Grounded Reason
-        fit_reason = self.generate_deterministic_fit_reason(job, matched, missing, fit_score)
+        fit_reason = self.generate_deterministic_fit_reason(
+            job, matched, missing, fit_score, is_guest=(profile is None)
+        )
 
         salary_text = None
         if job.compensation and job.compensation.min:
@@ -264,15 +305,15 @@ class MatchingEngineService:
         profile: Profile | None = None,
     ) -> list[ScoredJobOpportunity]:
         """Filter, score, and rank all active job opportunities."""
-        user_profile = profile or profile_service.get_profile()
         scored_list: list[ScoredJobOpportunity] = []
 
         for job in jobs:
-            scored = self.score_and_job_opportunity(job, user_profile)
+            scored = self.score_and_job_opportunity(job, profile)
             if scored:
                 scored_list.append(scored)
 
-        return sorted(scored_list, key=lambda s: s.fitScore, reverse=True)
+        # Scored opportunities first (highest score first), Unscored (None) at bottom
+        return sorted(scored_list, key=lambda s: (s.fitScore is not None, s.fitScore or 0), reverse=True)
 
 
 matching_engine = MatchingEngineService()

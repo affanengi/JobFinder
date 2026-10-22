@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Search, LogIn, LogOut, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { AuthModal } from '../auth/AuthModal';
+import { LogoutConfirmModal } from '../auth/LogoutConfirmModal';
+import { SyncStatusBadge } from '../common/SyncStatusBadge';
 
 interface TopHeaderProps {
   pageTitle: string;
@@ -11,6 +13,7 @@ interface TopHeaderProps {
 export const TopHeader: React.FC<TopHeaderProps> = ({ pageTitle, pageSubtitle }) => {
   const { user, logout } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
   return (
     <>
@@ -36,11 +39,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ pageTitle, pageSubtitle })
                   <UserIcon className="w-3.5 h-3.5 text-emerald-400" />
                 )}
                 <span className="truncate max-w-[120px]">{user.displayName || user.email?.split('@')[0]}</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Cloud Firestore Connected" />
               </div>
 
               <button
-                onClick={() => logout()}
+                onClick={() => setIsLogoutModalOpen(true)}
                 className="p-1.5 rounded-lg border border-white/10 text-[#A3A3A3] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
                 title="Sign Out"
               >
@@ -57,14 +59,16 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ pageTitle, pageSubtitle })
             </button>
           )}
 
-          <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/40 text-[11px] font-medium text-emerald-400 font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Firestore Synced</span>
-          </div>
+          <SyncStatusBadge />
         </div>
       </header>
 
       <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
+      <LogoutConfirmModal
+        isOpen={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+        onConfirm={logout}
+      />
     </>
   );
 };

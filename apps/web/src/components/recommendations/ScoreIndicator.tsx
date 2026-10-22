@@ -2,8 +2,8 @@ import { cn } from '../../lib/utils'
 import { MatchCategory } from '../../types/job'
 
 interface ScoreIndicatorProps {
-  score: number
-  category?: MatchCategory
+  score?: number | null
+  category?: MatchCategory | 'Unscored'
   size?: 'sm' | 'md' | 'lg'
   showLabel?: boolean
   className?: string
@@ -15,6 +15,27 @@ export function ScoreIndicator({
   showLabel = true,
   className
 }: ScoreIndicatorProps) {
+  const sizeStyles = {
+    sm: 'text-xs px-2 py-0.5',
+    md: 'text-xs px-2.5 py-1',
+    lg: 'text-sm px-3 py-1.5',
+  }
+
+  if (score === null || score === undefined) {
+    return (
+      <div
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-full border font-medium tracking-tight bg-white/5 text-neutral-400 border-white/10',
+          sizeStyles[size],
+          className
+        )}
+      >
+        <span className="font-bold">Unscored</span>
+        {showLabel && <span className="opacity-90 font-medium">· Incomplete Profile</span>}
+      </div>
+    )
+  }
+
   const getCategoryConfig = (score: number) => {
     if (score >= 90) {
       return {
@@ -56,13 +77,9 @@ export function ScoreIndicator({
     }
   }
 
-  const config = getCategoryConfig(score)
+  const safeScore = typeof score === 'number' && !isNaN(score) ? Math.round(score) : 0
+  const config = getCategoryConfig(safeScore)
 
-  const sizeStyles = {
-    sm: 'text-xs px-2 py-0.5',
-    md: 'text-xs px-2.5 py-1',
-    lg: 'text-sm px-3 py-1.5',
-  }
 
   return (
     <div
@@ -75,7 +92,7 @@ export function ScoreIndicator({
         className
       )}
     >
-      <span className="font-bold tabular-nums">{score}%</span>
+      <span className="font-bold tabular-nums">{safeScore}%</span>
       {showLabel && <span className="opacity-90 font-medium">· {config.label}</span>}
     </div>
   )

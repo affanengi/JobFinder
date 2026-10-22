@@ -18,6 +18,7 @@ import { useAuth } from "../context/AuthContext";
 import { ResumeStudioModal, TailoredResumeDTO } from "../components/resume/ResumeStudioModal";
 import { TailoredCoverLetterDTO } from "../components/resume/CoverLetterStudioPane";
 import { DeleteConfirmModal } from "../components/ui/DeleteConfirmModal";
+import { AuthRequiredEmptyState } from "../components/common/AuthRequiredEmptyState";
 
 interface ResumesPageProps {
   onNavigateToOpportunities?: () => void;
@@ -52,12 +53,9 @@ export const ResumesPage: React.FC<ResumesPageProps> = ({
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const fetchResumes = async () => {
+    if (!user) return;
     try {
-      const res = await fetchWithAuth("/api/v1/resumes", {
-        headers: {
-          "X-User-Id": user?.uid || "user_default",
-        },
-      });
+      const res = await fetchWithAuth("/api/v1/resumes");
       if (res.ok) {
         const data = await res.json();
         setResumes(Array.isArray(data) ? data : []);
@@ -68,12 +66,9 @@ export const ResumesPage: React.FC<ResumesPageProps> = ({
   };
 
   const fetchCoverLetters = async () => {
+    if (!user) return;
     try {
-      const res = await fetchWithAuth("/api/v1/cover-letters", {
-        headers: {
-          "X-User-Id": user?.uid || "user_default",
-        },
-      });
+      const res = await fetchWithAuth("/api/v1/cover-letters");
       if (res.ok) {
         const data = await res.json();
         setCoverLetters(Array.isArray(data) ? data : []);
@@ -84,6 +79,12 @@ export const ResumesPage: React.FC<ResumesPageProps> = ({
   };
 
   const loadAll = async () => {
+    if (!user) {
+      setResumes([]);
+      setCoverLetters([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       await Promise.all([fetchResumes(), fetchCoverLetters()]);
@@ -309,6 +310,27 @@ export const ResumesPage: React.FC<ResumesPageProps> = ({
           <Loader2 className="w-6 h-6 text-emerald-400 animate-spin" />
           <p className="text-xs text-[#888888] font-mono">Loading saved application documents...</p>
         </div>
+      ) : !user ? (
+        <AuthRequiredEmptyState
+          icon={FileText}
+          badge="Tailored Artifacts Hub"
+          title="Sign In to Manage Tailored Documents"
+          description="Sign in to generate, tailor, and save zero-hallucination resumes and cover letters for your applications."
+          benefits={[
+            "Deterministic ATS-tailored resume generation based on verified facts",
+            "One-click LaTeX (.tex), PDF, and Markdown export",
+            "Targeted cover letters with personalized evidence hooks",
+            "Automatic synchronization with application pipeline tracking"
+          ]}
+          primaryActionText="Sign In / Create Account"
+          secondaryAction={onNavigateToOpportunities ? {
+            label: "Explore Opportunities",
+            onClick: onNavigateToOpportunities,
+            icon: <ArrowRight className="w-3.5 h-3.5" />
+          } : undefined}
+          authModalTitle="Sign in to Manage Resumes"
+          authModalSubtitle="Access and export your tailored ATS resumes and cover letters."
+        />
       ) : activeTab === "resumes" ? (
         /* ================= RESUMES TAB ================= */
         resumes.length === 0 ? (

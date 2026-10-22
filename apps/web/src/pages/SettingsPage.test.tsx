@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SettingsPage } from "./SettingsPage";
+import { AuthProvider, mockTestUser } from "../context/AuthContext";
 
 // Mock API client
 vi.mock("../lib/api", () => ({
@@ -72,8 +73,15 @@ describe("SettingsPage Autofill Configuration & Integrations", () => {
     });
   });
 
+  const renderSettings = (user: any = mockTestUser) =>
+    render(
+      <AuthProvider initialUser={user}>
+        <SettingsPage />
+      </AuthProvider>
+    );
+
   it("renders Autofill Configuration tab by default with loaded fields", async () => {
-    render(<SettingsPage />);
+    renderSettings();
 
     expect(screen.getByText("Settings & Configuration")).toBeDefined();
     expect(screen.getByText("Autofill Configuration")).toBeDefined();
@@ -90,7 +98,7 @@ describe("SettingsPage Autofill Configuration & Integrations", () => {
   });
 
   it("switches to Discovery & Integrations tab and shows Extension Clipper card", async () => {
-    render(<SettingsPage />);
+    renderSettings();
 
     const integrationsTab = screen.getByRole("button", { name: /Discovery & Integrations/i });
     fireEvent.click(integrationsTab);
@@ -102,7 +110,7 @@ describe("SettingsPage Autofill Configuration & Integrations", () => {
   });
 
   it("enables Save button and shows unsaved changes badge on edit", async () => {
-    render(<SettingsPage />);
+    renderSettings();
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("Road 12, Banjara Hills")).toBeDefined();
@@ -117,7 +125,7 @@ describe("SettingsPage Autofill Configuration & Integrations", () => {
   });
 
   it("prefills from Master Profile on explicit button click without auto-saving", async () => {
-    render(<SettingsPage />);
+    renderSettings();
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("affan@example.com")).toBeDefined();
@@ -137,7 +145,7 @@ describe("SettingsPage Autofill Configuration & Integrations", () => {
   });
 
   it("submits updated autofill profile to PUT /api/v1/profile/autofill on save", async () => {
-    render(<SettingsPage />);
+    renderSettings();
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("Road 12, Banjara Hills")).toBeDefined();
@@ -161,6 +169,73 @@ describe("SettingsPage Autofill Configuration & Integrations", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Autofill Configuration saved successfully/i)).toBeDefined();
+    });
+  });
+
+  it("suppresses protected autofill profile request when signed out", async () => {
+    renderSettings(null);
+
+    // Verify protected profile/autofill endpoint is NOT called
+    expect(fetchWithAuth).not.toHaveBeenCalledWith("/api/v1/profile/autofill");
+    expect(fetchWithAuth).not.toHaveBeenCalledWith("/api/v1/profile");
+  });
+
+  it("displays guest notice in Autofill tab and opens AuthModal when guest clicks Save", async () => {
+    renderSettings(null);
+
+    // Verify guest notice is rendered
+    expect(screen.getByText("Sign In Required for Cloud Autofill")).toBeDefined();
+
+    // Fill in a field to enable save
+    const streetInput = screen.getByPlaceholderText(/123 Innovation Drive/i);
+    fireEvent.change(streetInput, { target: { value: "100 Innovation Way" } });
+
+    const saveButton = screen.getByRole("button", { name: /Save Autofill Configuration/i });
+    fireEvent.click(saveButton);
+
+    // Verify AuthModal is opened with contextual copy
+    await waitFor(() => {
+      expect(screen.getByText("Sign in to Save Autofill Profile")).toBeDefined();
+    });
+
+    // Ensure no PUT mutation was fired
+    expect(fetchWithAuth).not.toHaveBeenCalledWith(
+      "/api/v1/profile/autofill",
+      expect.objectContaining({ method: "PUT" })
+    );
+  });
+
+  it("never renders hardcoded mock token clp_live_affan_personal in Integrations tab", async () => {
+    // Render as guest
+    renderSettings(null);
+
+    const integrationsTab = screen.getByRole("button", { name: /Discovery & Integrations/i });
+    fireEvent.click(integrationsTab);
+
+    // Mock token must NEVER exist in DOM
+    expect(screen.queryByText(/clp_live_affan_personal/)).toBeNull();
+
+    // Guest should see sign in required notice for extension token
+    expect(screen.getByText("Sign In to Access Token")).toBeDefined();
+  });
+
+  it("allows authenticated user to generate real session token in Integrations tab", async () => {
+    renderSettings(mockTestUser);
+
+    const integrationsTab = screen.getByRole("button", { name: /Discovery & Integrations/i });
+    fireEvent.click(integrationsTab);
+
+    // Mock token must NEVER exist in DOM
+    expect(screen.queryByText(/clp_live_affan_personal/)).toBeNull();
+
+    // Button to generate session token should be visible
+    const generateBtn = screen.getByRole("button", { name: /Reveal Session Token/i });
+    expect(generateBtn).toBeDefined();
+
+    fireEvent.click(generateBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("mock-id-token")).toBeDefined();
     });
   });
 });

@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ResumesPage } from "./ResumesPage";
-import { AuthProvider } from "../context/AuthContext";
+import { AuthProvider, mockTestUser } from "../context/AuthContext";
 
 // Mock api
 vi.mock("../lib/api", () => ({
@@ -74,14 +74,17 @@ describe("ResumesPage Hub with Resumes, Cover Letters, and ATS Scanner Link", ()
     });
   });
 
+  const renderComponent = (user: any = mockTestUser, onNavigateToScanner?: (rId: string, jId?: string) => void) =>
+    render(
+      <AuthProvider initialUser={user}>
+        <ResumesPage onNavigateToScanner={onNavigateToScanner} />
+      </AuthProvider>
+    );
+
   it("renders resumes tab by default with saved resume card and Run ATS Scan button", async () => {
     const handleScan = vi.fn();
 
-    render(
-      <AuthProvider>
-        <ResumesPage onNavigateToScanner={handleScan} />
-      </AuthProvider>
-    );
+    renderComponent(mockTestUser, handleScan);
 
     expect(await screen.findByText("Application Artifacts Hub")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Resumes/i })).toBeInTheDocument();
@@ -100,11 +103,7 @@ describe("ResumesPage Hub with Resumes, Cover Letters, and ATS Scanner Link", ()
   });
 
   it("switches to cover letters tab and displays tailored cover letter card", async () => {
-    render(
-      <AuthProvider>
-        <ResumesPage />
-      </AuthProvider>
-    );
+    renderComponent();
 
     expect(await screen.findByText("Application Artifacts Hub")).toBeInTheDocument();
 
@@ -114,5 +113,18 @@ describe("ResumesPage Hub with Resumes, Cover Letters, and ATS Scanner Link", ()
     // Verify cover letter card content
     expect(await screen.findByText("enthusiastic Tone")).toBeInTheDocument();
     expect(screen.getByText("I am writing with great enthusiasm for the Senior Backend Engineer position.")).toBeInTheDocument();
+  });
+
+  it("suppresses protected resume requests and renders AuthRequiredEmptyState for guests", async () => {
+    renderComponent(null);
+
+    // Verify protected endpoints are NOT called
+    expect(fetchWithAuth).not.toHaveBeenCalledWith("/api/v1/resumes");
+    expect(fetchWithAuth).not.toHaveBeenCalledWith("/api/v1/cover-letters");
+
+    // Verify empty state is displayed
+    expect(await screen.findByText("Sign In to Manage Tailored Documents")).toBeInTheDocument();
+    expect(screen.getByText("Tailored Artifacts Hub")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign In \/ Create Account/i })).toBeInTheDocument();
   });
 });

@@ -169,15 +169,15 @@ const RadialScoreGauge = ({ score }: { score: number }) => {
   const radius = 44;
   const strokeWidth = 7;
   const circumference = 2 * Math.PI * radius; // ~276.46
-  const normalizedScore = Math.min(Math.max(score, 0), 100);
-  const strokeDashoffset = circumference - (normalizedScore / 100) * circumference;
+  const safeScore = typeof score === "number" && !isNaN(score) ? Math.min(Math.max(Math.round(score), 0), 100) : 0;
+  const strokeDashoffset = circumference - (safeScore / 100) * circumference;
 
   const strokeColor =
-    score >= 80 ? "#34d399" : score >= 65 ? "#fbbf24" : "#f87171";
+    safeScore >= 80 ? "#34d399" : safeScore >= 65 ? "#fbbf24" : "#f87171";
   const glowColor =
-    score >= 80
+    safeScore >= 80
       ? "rgba(52, 211, 153, 0.3)"
-      : score >= 65
+      : safeScore >= 65
       ? "rgba(251, 191, 36, 0.3)"
       : "rgba(248, 113, 113, 0.3)";
 
@@ -214,9 +214,9 @@ const RadialScoreGauge = ({ score }: { score: number }) => {
       {/* Centered Score Label */}
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
         <span className={'text-3xl font-black font-mono tracking-tight ' + (
-          score >= 80 ? 'text-emerald-400' : score >= 65 ? 'text-amber-400' : 'text-rose-400'
+          safeScore >= 80 ? 'text-emerald-400' : safeScore >= 65 ? 'text-amber-400' : 'text-rose-400'
         )}>
-          {score}
+          {safeScore}
         </span>
         <span className="text-[10px] text-neutral-400 uppercase tracking-widest font-mono -mt-0.5">
           / 100
@@ -403,16 +403,21 @@ export const ScannerPage = ({
     const fetchData = async () => {
       setLoadingData(true);
       try {
+        if (!user) {
+          setResumes([]);
+          setSavedReports([]);
+          const resJobs = await fetchWithAuth("/api/v1/recommendations").catch(() => null);
+          if (resJobs && resJobs.ok) {
+            const jobData = await resJobs.json();
+            setJobs(Array.isArray(jobData) ? jobData : []);
+          }
+          return;
+        }
+
         const [resResumes, resJobs, resReports] = await Promise.all([
-          fetchWithAuth("/api/v1/resumes", {
-            headers: { "X-User-Id": user?.uid || "user_default" },
-          }),
-          fetchWithAuth("/api/v1/recommendations", {
-            headers: { "X-User-Id": user?.uid || "user_default" },
-          }),
-          fetchWithAuth("/api/v1/scanner/reports", {
-            headers: { "X-User-Id": user?.uid || "user_default" },
-          }),
+          fetchWithAuth("/api/v1/resumes"),
+          fetchWithAuth("/api/v1/recommendations"),
+          fetchWithAuth("/api/v1/scanner/reports"),
         ]);
 
         let loadedResumes: TailoredResumeDTO[] = [];
@@ -452,11 +457,13 @@ export const ScannerPage = ({
   }, [user, initialResumeId, initialJobId]);
 
   const loadSavedReports = async () => {
+    if (!user) {
+      setSavedReports([]);
+      return;
+    }
     setLoadingReports(true);
     try {
-      const res = await fetchWithAuth("/api/v1/scanner/reports", {
-        headers: { "X-User-Id": user?.uid || "user_default" },
-      });
+      const res = await fetchWithAuth("/api/v1/scanner/reports");
       if (res.ok) {
         const data = await res.json();
         setSavedReports(Array.isArray(data) ? data : []);
@@ -644,7 +651,7 @@ export const ScannerPage = ({
 
   const selectAllNeedsAttention = () => {
     if (!activeScanResult) return;
-    const attentionIds = activeScanResult.bullet_audits
+    const attentionIds = (activeScanResult.bullet_audits || [])
       .filter((b) => b.status !== "strong" || !b.has_action_verb || !b.has_metric || b.has_weak_opener)
       .map((b) => b.id);
     setSelectedBulletIds(new Set(attentionIds));
@@ -652,7 +659,7 @@ export const ScannerPage = ({
 
   const selectAllBullets = () => {
     if (!activeScanResult) return;
-    const allIds = activeScanResult.bullet_audits.map((b) => b.id);
+    const allIds = (activeScanResult.bullet_audits || []).map((b) => b.id);
     setSelectedBulletIds(new Set(allIds));
   };
 
@@ -1541,14 +1548,14 @@ export const ScannerPage = ({
                     <p className="text-xs text-neutral-300">
                       {atsEvidenceReport.truthIntegrityStatus === 'VERIFIED'
                         ? 'All resume keywords and claims are strictly grounded in canonical Master Profile facts.'
-                        : `Unsupported keywords detected: ${atsEvidenceReport.unsupportedKeywords.join(', ')}. Truth integrity is evaluated independently from ATS score.`}
+                        : `Unsupported keywords detected: ${(atsEvidenceReport.unsupportedKeywords || []).join(', ')}. Truth integrity is evaluated independently from ATS score.`}
                     </p>
                   </div>
                 </div>
                 <div className="text-right shrink-0">
                   <div className="text-[10px] font-mono text-neutral-400 uppercase">Audit Classification</div>
                   <div className="text-xs font-mono text-neutral-300">
-                    {atsEvidenceReport.evidenceAudit.length} audited items
+                    {(atsEvidenceReport.evidenceAudit || atsEvidenceReport.items || []).length} audited items
                   </div>
                 </div>
               </div>

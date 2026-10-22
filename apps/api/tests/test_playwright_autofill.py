@@ -43,9 +43,18 @@ def clean_sessions():
     playwright_autofill_engine._active_sessions.clear()
     playwright_autofill_engine._temp_dirs.clear()
     playwright_autofill_engine._browser_contexts.clear()
-    # Force headless in automated test environment
+    # Force headless and disable long inactivity sleep in automated test environment
     playwright_autofill_engine.headless_override = True
+    playwright_autofill_engine.inactivity_timeout_seconds = 0
     yield
+    for task in list(playwright_autofill_engine._session_tasks.values()):
+        if not task.done():
+            task.cancel()
+    playwright_autofill_engine._session_tasks.clear()
+    for task in list(playwright_autofill_engine._inactivity_tasks.values()):
+        if not task.done():
+            task.cancel()
+    playwright_autofill_engine._inactivity_tasks.clear()
     playwright_autofill_engine._active_sessions.clear()
     for d in list(playwright_autofill_engine._temp_dirs.values()):
         if os.path.exists(d):

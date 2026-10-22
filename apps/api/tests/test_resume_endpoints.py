@@ -100,12 +100,12 @@ def test_tailor_resume_api(setup_mock_job_and_ai):
 
     # Test PDF download endpoint
     resume_id = data["id"]
-    pdf_resp = client.get(f"/api/v1/resumes/{resume_id}/pdf")
+    pdf_resp = client.get(f"/api/v1/resumes/{resume_id}/pdf", headers={"X-User-Id": "user_default"})
     assert pdf_resp.status_code == 200
     assert pdf_resp.headers["content-type"] == "application/pdf"
     assert pdf_resp.content.startswith(b"%PDF")
 
     # Test TEX download endpoint
-    tex_resp = client.get(f"/api/v1/resumes/{resume_id}/tex")
+    tex_resp = client.get(f"/api/v1/resumes/{resume_id}/tex", headers={"X-User-Id": "user_default"})
     assert tex_resp.status_code == 200
     assert "\\documentclass" in tex_resp.text

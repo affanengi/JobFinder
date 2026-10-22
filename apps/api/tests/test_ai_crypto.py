@@ -116,13 +116,17 @@ def test_missing_or_short_secret_key():
 
 def test_environment_variable_fallback():
     """Verify that encryption uses AI_ENCRYPTION_SECRET from environment if secret_key arg is None."""
+    old_env = os.environ.get("AI_ENCRYPTION_SECRET")
     os.environ["AI_ENCRYPTION_SECRET"] = SAMPLE_SECRET
     try:
         key = "sample-env-key-12345"
         encrypted = encrypt_api_key(key)
         assert decrypt_api_key(encrypted) == key
     finally:
-        os.environ.pop("AI_ENCRYPTION_SECRET", None)
+        if old_env is not None:
+            os.environ["AI_ENCRYPTION_SECRET"] = old_env
+        else:
+            os.environ.pop("AI_ENCRYPTION_SECRET", None)
 
 
 def test_empty_key_rejected():

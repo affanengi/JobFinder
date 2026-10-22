@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { fetchWithAuth } from '../../lib/api'
+import { useAuth } from '../../context/AuthContext'
+import { useSync } from '../../context/SyncContext'
+import { AuthModal } from '../auth/AuthModal'
 import { Modal } from '../ui/Modal'
 import { DeleteConfirmModal } from '../ui/DeleteConfirmModal'
 import { TaskRoutingMapEditor } from './TaskRoutingMapEditor'
@@ -149,6 +152,13 @@ const PROVIDERS_META = [
 ]
 
 export const AiApiHubSettings: React.FC = () => {
+  const { user } = useAuth()
+  const { recordPersistenceSuccess, recordPersistenceFailure } = useSync()
+  const [authModalConfig, setAuthModalConfig] = useState<{
+    isOpen: boolean
+    title?: string
+    subtitle?: string
+  }>({ isOpen: false })
   // Navigation / provider tab state
   const [selectedProviderTab, setSelectedProviderTab] = useState<'gemini' | 'openrouter' | 'groq'>('gemini')
 
@@ -196,6 +206,23 @@ export const AiApiHubSettings: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true)
     try {
+      if (!user) {
+        // Guest mode: ONLY fetch public models catalog; skip protected endpoints
+        setCredentials([])
+        setHealthData(null)
+        setTelemetrySummary(null)
+        setRecentExecutions([])
+
+        const modelsRes = await fetchWithAuth('/api/v1/ai/models').catch(() => null)
+        if (modelsRes && modelsRes.ok) {
+          const mData = await modelsRes.json()
+          if (Array.isArray(mData)) {
+            setModels(mData)
+          }
+        }
+        return
+      }
+
       const [credsRes, settingsRes, healthRes, modelsRes, teleRes] = await Promise.all([
         fetchWithAuth('/api/v1/ai/credentials'),
         fetchWithAuth('/api/v1/ai/settings'),
@@ -266,9 +293,20 @@ export const AiApiHubSettings: React.FC = () => {
 
   useEffect(() => {
     loadData()
-  }, [])
+
+    const handleLogout = () => {
+      setCredentials([])
+      setRecentExecutions([])
+      setTelemetrySummary(null)
+      setHealthData(null)
+      setModels([])
+    }
+    window.addEventListener('jobfinder:logout', handleLogout)
+    return () => window.removeEventListener('jobfinder:logout', handleLogout)
+  }, [user])
 
   const refreshHealth = async () => {
+    if (!user) return
     setIsHealthRefreshing(true)
     try {
       const res = await fetchWithAuth('/api/v1/ai/health')
@@ -304,6 +342,14 @@ export const AiApiHubSettings: React.FC = () => {
   }
 
   const handleTestConnection = async (credId: string) => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Probe API Key',
+        subtitle: 'Testing AI credentials requires an authenticated account session.',
+      })
+      return
+    }
     setProbingCredId(credId)
     try {
       const res = await fetchWithAuth(`/api/v1/ai/credentials/${credId}/probe`, {
@@ -352,6 +398,14 @@ export const AiApiHubSettings: React.FC = () => {
   }
 
   const handleToggleActive = async (credId: string) => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Manage Credentials',
+        subtitle: 'Enabling or disabling AI credentials requires an authenticated account.',
+      })
+      return
+    }
     const cred = credentials.find((c) => c.id === credId)
     if (!cred) return
     const newStatus = !cred.isActive
@@ -370,9 +424,11 @@ export const AiApiHubSettings: React.FC = () => {
       if (!res.ok) {
         throw new Error('Server returned error')
       }
+      recordPersistenceSuccess('AI Credential Status')
       await refreshHealth()
     } catch (err) {
       console.error('Failed to toggle status on server:', err)
+      recordPersistenceFailure('Failed to update AI credential status')
       // Revert if error
       setCredentials((prev) =>
         prev.map((c) => (c.id === credId ? { ...c, isActive: !newStatus } : c))
@@ -381,6 +437,14 @@ export const AiApiHubSettings: React.FC = () => {
   }
 
   const handleConfirmDelete = async () => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Delete Credentials',
+        subtitle: 'Deleting credentials requires an authenticated account.',
+      })
+      return
+    }
     if (!deletingCred) return
     const credId = deletingCred.id
 
@@ -390,44 +454,83 @@ export const AiApiHubSettings: React.FC = () => {
       })
       if (res.ok) {
         setCredentials((prev) => prev.filter((c) => c.id !== credId))
+        recordPersistenceSuccess('AI Credential Deletion')
         await refreshHealth()
       } else {
         const err = await res.json()
+        recordPersistenceFailure('Failed to delete AI credential')
         alert(`Failed to delete credential: ${err.detail || 'Unknown error'}`)
       }
     } catch (err) {
       console.error('Error deleting credential:', err)
+      recordPersistenceFailure('Failed to delete AI credential')
       alert('Network or server error while deleting credential.')
     }
   }
 
   const handleCostPolicyChange = async (newPolicy: 'FREE_ONLY' | 'FREE_PREFERRED' | 'ANY_CONFIGURED') => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Configure Routing Policies',
+        subtitle: 'AI cost policies and routing rules are saved to your authenticated account.',
+      })
+      return
+    }
     setCostPolicy(newPolicy)
     try {
-      await fetchWithAuth('/api/v1/ai/settings', {
+      const res = await fetchWithAuth('/api/v1/ai/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ costPolicy: newPolicy }),
       })
+      if (res.ok) {
+        recordPersistenceSuccess('AI Cost Policy')
+      } else {
+        recordPersistenceFailure('Failed to update AI cost policy')
+      }
     } catch (err) {
       console.error('Failed to persist cost policy:', err)
+      recordPersistenceFailure('Failed to update AI cost policy')
     }
   }
 
   const handleAllowPaidFallbackChange = async (newVal: boolean) => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Configure Routing Policies',
+        subtitle: 'AI fallback preferences are saved to your authenticated account.',
+      })
+      return
+    }
     setAllowPaidFallback(newVal)
     try {
-      await fetchWithAuth('/api/v1/ai/settings', {
+      const res = await fetchWithAuth('/api/v1/ai/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ allowPaidFallback: newVal }),
       })
+      if (res.ok) {
+        recordPersistenceSuccess('AI Fallback Setting')
+      } else {
+        recordPersistenceFailure('Failed to update AI fallback setting')
+      }
     } catch (err) {
       console.error('Failed to persist allowPaidFallback setting:', err)
+      recordPersistenceFailure('Failed to update AI fallback setting')
     }
   }
 
   const handleTaskRoutingChange = async (taskKey: string, provider: string) => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Configure Routing Policies',
+        subtitle: 'Task routing rules are saved to your authenticated account.',
+      })
+      return
+    }
     const previous = { ...taskRouting }
     const updated = { ...taskRouting }
     if (!provider || provider === 'auto') {
@@ -448,18 +551,29 @@ export const AiApiHubSettings: React.FC = () => {
         if (data.taskRouting && typeof data.taskRouting === 'object') {
           setTaskRouting(data.taskRouting)
         }
+        recordPersistenceSuccess('AI Task Routing')
       } else {
         const err = await res.json().catch(() => ({}))
         console.error('Failed to save task routing preference:', err)
+        recordPersistenceFailure('Failed to update AI task routing')
         setTaskRouting(previous)
       }
     } catch (err) {
       console.error('Failed to save task routing preference:', err)
+      recordPersistenceFailure('Failed to update AI task routing')
       setTaskRouting(previous)
     }
   }
 
   const openAddModal = (provider: 'gemini' | 'openrouter' | 'groq') => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Add AI Credentials',
+        subtitle: 'Your API keys are encrypted at rest with AES-256-GCM and scoped to your authenticated account.',
+      })
+      return
+    }
     setFormProvider(provider)
     setFormFriendlyName('')
     setFormApiKey('')
@@ -470,6 +584,14 @@ export const AiApiHubSettings: React.FC = () => {
   }
 
   const handleOpenEditModal = (cred: CredentialItem) => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Edit AI Credentials',
+        subtitle: 'Editing AI credentials requires an authenticated account.',
+      })
+      return
+    }
     setEditingCred(cred)
     setEditFriendlyName(cred.friendlyName)
     setEditApiKey('')
@@ -484,6 +606,14 @@ export const AiApiHubSettings: React.FC = () => {
 
   const handleUpdateCredential = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Update AI Credentials',
+        subtitle: 'Updating credentials requires an authenticated account.',
+      })
+      return
+    }
     if (!editingCred) return
 
     if (!editFriendlyName.trim()) {
@@ -533,6 +663,7 @@ export const AiApiHubSettings: React.FC = () => {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
+        recordPersistenceFailure('Failed to update AI credential')
         alert(`Failed to update credential: ${err.detail || 'Unknown error'}`)
         return
       }
@@ -555,9 +686,11 @@ export const AiApiHubSettings: React.FC = () => {
         prev.map((c) => (c.id === updatedCred.id ? updatedCred : c))
       )
       setEditingCred(null)
+      recordPersistenceSuccess('AI Credential Update')
       await refreshHealth()
     } catch (err) {
       console.error('Error updating credential:', err)
+      recordPersistenceFailure('Failed to update AI credential')
       alert('Network or server error while updating credential.')
     } finally {
       setIsUpdatingCred(false)
@@ -566,6 +699,14 @@ export const AiApiHubSettings: React.FC = () => {
 
   const handleAddCredential = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Add AI Credentials',
+        subtitle: 'Adding credentials requires an authenticated account.',
+      })
+      return
+    }
     if (!formApiKey.trim()) {
       alert('API Key is required.')
       return
@@ -597,6 +738,7 @@ export const AiApiHubSettings: React.FC = () => {
 
       if (!res.ok) {
         const err = await res.json()
+        recordPersistenceFailure('Failed to save AI credential')
         alert(`Failed to save credential: ${err.detail || 'Unknown error'}`)
         return
       }
@@ -620,9 +762,11 @@ export const AiApiHubSettings: React.FC = () => {
       setFormFriendlyName('')
       setFormApiKey('')
       setFormProjectScope('')
+      recordPersistenceSuccess('AI Credential Creation')
       await refreshHealth()
     } catch (err) {
       console.error('Error adding credential:', err)
+      recordPersistenceFailure('Failed to save AI credential')
       alert('Network or server error while saving credential.')
     } finally {
       setIsSavingCred(false)
@@ -761,6 +905,38 @@ export const AiApiHubSettings: React.FC = () => {
 
       {/* Main Layout: Graph Gets Priority & Full Width */}
       <div className="space-y-6">
+        {!user && (
+          <div
+            data-testid="ai-hub-guest-banner"
+            className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                <Lock className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-white">Private AI Hub Vault</h4>
+                <p className="text-xs text-zinc-400 mt-0.5 leading-relaxed">
+                  Account-specific AI credentials, routing policies, and usage telemetry are protected and encrypted at rest with AES-256-GCM in Cloud Firestore. Sign in to add your Gemini, OpenRouter, or Groq API keys.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                setAuthModalConfig({
+                  isOpen: true,
+                  title: 'Sign in to Configure AI Hub',
+                  subtitle: 'Sign in to securely store your API keys and customize task routing.',
+                })
+              }
+              className="px-3.5 py-1.5 bg-emerald-500 text-black font-semibold text-xs rounded-lg hover:bg-emerald-400 transition-colors whitespace-nowrap self-stretch sm:self-auto cursor-pointer"
+            >
+              Sign in to Configure
+            </button>
+          </div>
+        )}
+
         {/* AREA A: PROVIDERS & CREDENTIALS */}
           <div className="bg-surface rounded-xl border border-border p-5 space-y-4 shadow-sm">
             <div className="border-b border-border pb-3">
@@ -1903,6 +2079,13 @@ export const AiApiHubSettings: React.FC = () => {
         message="Are you sure you want to permanently delete this credential? This action will remove it from your AES-256-GCM encrypted vault in Cloud Firestore."
         onConfirm={handleConfirmDelete}
         onClose={() => setDeletingCred(null)}
+      />
+
+      <AuthModal
+        isOpen={authModalConfig.isOpen}
+        onClose={() => setAuthModalConfig({ isOpen: false })}
+        title={authModalConfig.title}
+        subtitle={authModalConfig.subtitle}
       />
     </div>
   )

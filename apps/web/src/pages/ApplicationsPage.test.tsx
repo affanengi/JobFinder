@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ApplicationsPage } from "./ApplicationsPage";
-import { AuthProvider } from "../context/AuthContext";
+import { AuthProvider, mockTestUser } from "../context/AuthContext";
 
 // Mock api
 vi.mock("../lib/api", () => ({
@@ -150,10 +150,10 @@ describe("ApplicationsPage - Drag-and-Drop Lifecycle & Outcome Tracker", () => {
     });
   });
 
-  const renderComponent = () =>
+  const renderComponent = (user: any = mockTestUser, onNavigateToOpportunities?: () => void) =>
     render(
-      <AuthProvider>
-        <ApplicationsPage />
+      <AuthProvider initialUser={user}>
+        <ApplicationsPage onNavigateToOpportunities={onNavigateToOpportunities} />
       </AuthProvider>
     );
 
@@ -416,10 +416,14 @@ describe("ApplicationsPage - Drag-and-Drop Lifecycle & Outcome Tracker", () => {
 });
 
 describe("ApplicationsPage - Activity Date Filter Scoping & Behavior", () => {
-  const renderComponent = () =>
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const renderComponent = (user: any = mockTestUser, onNavigateToOpportunities?: () => void) =>
     render(
-      <AuthProvider>
-        <ApplicationsPage />
+      <AuthProvider initialUser={user}>
+        <ApplicationsPage onNavigateToOpportunities={onNavigateToOpportunities} />
       </AuthProvider>
     );
 
@@ -480,5 +484,30 @@ describe("ApplicationsPage - Activity Date Filter Scoping & Behavior", () => {
       expect(screen.getByText("OpenAI")).toBeInTheDocument();
       expect(screen.getByText("All Time")).toBeInTheDocument();
     });
+  });
+
+  it("suppresses protected network requests and displays AuthRequiredEmptyState for guests", async () => {
+    const handleExplore = vi.fn();
+    renderComponent(null, handleExplore);
+
+    // Verify protected endpoints are NOT called
+    expect(fetchWithAuth).not.toHaveBeenCalledWith("/api/v1/applications");
+    expect(fetchWithAuth).not.toHaveBeenCalledWith("/api/v1/applications/sync-from-saved");
+
+    // Verify empty state is displayed
+    expect(await screen.findByText("Sign In to Track Your Job Applications")).toBeInTheDocument();
+    expect(screen.getByText("Application Pipeline Tracker")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Keep all your job applications organized in one unified pipeline/i)
+    ).toBeInTheDocument();
+
+    // Verify Explore Opportunities button triggers callback
+    const exploreBtn = screen.getByRole("button", { name: /Explore Opportunities/i });
+    expect(exploreBtn).toBeInTheDocument();
+    fireEvent.click(exploreBtn);
+    expect(handleExplore).toHaveBeenCalledTimes(1);
+
+    // Verify primary sign-in action button exists
+    expect(screen.getByRole("button", { name: /Sign In \/ Create Account/i })).toBeInTheDocument();
   });
 });

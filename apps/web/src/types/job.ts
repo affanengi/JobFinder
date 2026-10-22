@@ -4,7 +4,7 @@ export type EmploymentType = 'internship' | 'full_time' | 'part_time' | 'contrac
 
 export type RecommendationStatus = 'new' | 'viewed' | 'approved' | 'saved' | 'skipped' | 'rejected'
 
-export type MatchCategory = 'strong_match' | 'good_match' | 'possible_match' | 'weak_match' | 'reject'
+export type MatchCategory = 'strong_match' | 'good_match' | 'possible_match' | 'weak_match' | 'reject' | 'unscored'
 
 export interface ScoreBreakdown {
   skills: number // 30%
@@ -54,7 +54,7 @@ export interface JobOpportunity {
   // Structured Recommendation Signals (adheres to SCHEMA.md)
   recommendation: {
     id: string
-    score: number // 0-100
+    score: number | null // 0-100 or null if Unscored
     category: MatchCategory
     breakdown: ScoreBreakdown
     matchedRequirements: string[]

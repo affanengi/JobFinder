@@ -84,7 +84,10 @@ async def ingest_job_from_text(request: IngestTextRequest):
 
 
 @router.post("/discover", response_model=list[CanonicalJob])
-async def discover_jobs(request: DiscoveryRequest | None = None):
+async def discover_jobs(
+    request: DiscoveryRequest | None = None,
+    user_id: str = Depends(get_authenticated_user_id),
+):
     """Fetch active jobs from public tech company ATS boards."""
     slugs = request.companySlugs if request else None
     limit = request.limitPerCompany if request else 10

@@ -3,8 +3,9 @@
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 
+from app.core.auth import get_authenticated_user_id
 from app.db.repositories.resume_repo import resume_repo
 from app.schemas.resume import (
     ResumeValidationResult,
@@ -27,13 +28,17 @@ router = APIRouter(prefix="/resumes", tags=["AI Resumes & Validation"])
 @router.post("/tailor", response_model=TailoredResumeDTO)
 async def tailor_resume(
     req: TailorResumeRequest,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
-    user_id: str | None = None,
 ) -> TailoredResumeDTO:
     """Tailor an ATS-optimized resume for a target job with 1-shot Gemini intelligence and deterministic validation."""
-    active_uid = user_id or req.user_id or x_user_id or "user_default"
-    logger.info(f"Tailoring resume for active user ID: {active_uid}")
-    profile = profile_service.get_profile(user_id=active_uid)
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
+    logger.info(f"Tailoring resume for active user ID: {user_id}")
+    profile = profile_service.get_profile(user_id=user_id)
     job = job_service.get_job(req.job_id)
 
     if not job:
@@ -48,7 +53,7 @@ async def tailor_resume(
             profile=profile,
             custom_instructions=req.custom_instructions,
         )
-        dto.userId = active_uid
+        dto.userId = user_id
         resume_repo.save_tailored_resume(dto)
         return dto
     except Exception as e:
@@ -63,12 +68,16 @@ async def tailor_resume(
 @router.post("/validate-direct")
 async def validate_and_render(
     content_or_req: StructuredResumeContent | ValidateAndRenderRequest,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
-    user_id: str | None = None,
 ) -> dict:
     """Validate user-edited structured resume content and produce updated LaTeX and validation status."""
-    active_uid = user_id or x_user_id or "user_default"
-    profile = profile_service.get_profile(user_id=active_uid)
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
+    profile = profile_service.get_profile(user_id=user_id)
     
     if isinstance(content_or_req, ValidateAndRenderRequest):
         structured = content_or_req.structured_content
@@ -87,6 +96,7 @@ async def validate_and_render(
 @router.post("/render-pdf-direct")
 async def render_pdf_direct(
     content: StructuredResumeContent,
+    user_id: str = Depends(get_authenticated_user_id),
 ) -> Response:
     """Render StructuredResumeContent directly to streaming binary PDF bytes using ReportLab."""
     try:
@@ -105,16 +115,25 @@ async def render_pdf_direct(
 async def update_resume(
     resume_id: str,
     content: StructuredResumeContent,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
-    user_id: str | None = None,
 ) -> TailoredResumeDTO:
     """Save manual edits to structured resume content in Firestore (Zero AI cost)."""
-    active_uid = user_id or x_user_id or "user_default"
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     existing = resume_repo.get_tailored_resume(resume_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Resume '{resume_id}' not found.")
+    if existing.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to resume.",
+        )
 
-    profile = profile_service.get_profile(user_id=active_uid)
+    profile = profile_service.get_profile(user_id=user_id)
     val_result: ResumeValidationResult = resume_validator.validate(content, profile)
     latex_code = latex_engine.generate_latex(content)
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -139,12 +158,23 @@ async def update_resume(
 @router.get("/{resume_id}/pdf")
 async def get_resume_pdf(
     resume_id: str,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ) -> Response:
     """Download or view compiled canonical ATS PDF by resume ID."""
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     resume = resume_repo.get_tailored_resume(resume_id)
     if not resume:
         raise HTTPException(status_code=404, detail=f"Resume '{resume_id}' not found.")
+    if resume.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to resume.",
+        )
 
     try:
         pdf_bytes = reportlab_renderer.render_to_pdf_bytes(resume.structuredContent)
@@ -162,12 +192,23 @@ async def get_resume_pdf(
 @router.get("/{resume_id}/tex")
 async def get_resume_latex(
     resume_id: str,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ) -> Response:
     """Download clean standalone LaTeX (.tex) source file."""
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     resume = resume_repo.get_tailored_resume(resume_id)
     if not resume:
         raise HTTPException(status_code=404, detail=f"Resume '{resume_id}' not found.")
+    if resume.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to resume.",
+        )
 
     safe_co = resume.jobCompany.replace(" ", "_")
     return Response(
@@ -180,33 +221,53 @@ async def get_resume_latex(
 @router.get("/job/{job_id}", response_model=TailoredResumeDTO | None)
 async def get_resume_for_job(
     job_id: str,
-    x_user_id: str | None = Header(default="user_default", alias="X-User-Id"),
-    user_id: str | None = None,
+    user_id: str = Depends(get_authenticated_user_id),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ):
     """Retrieve existing tailored resume for a specific job from Firestore (Zero AI calls)."""
-    active_uid = user_id or x_user_id or "user_default"
-    return resume_repo.get_resume_for_job(user_id=active_uid, job_id=job_id)
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
+    return resume_repo.get_resume_for_job(user_id=user_id, job_id=job_id)
 
 
 @router.get("", response_model=list[TailoredResumeDTO])
 async def list_resumes(
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
-    user_id: str | None = None,
 ) -> list[TailoredResumeDTO]:
     """List all saved tailored resumes for the authenticated candidate."""
-    active_uid = user_id or x_user_id or "user_default"
-    return resume_repo.list_user_resumes(user_id=active_uid)
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
+    return resume_repo.list_user_resumes(user_id=user_id)
 
 
 @router.delete("/{resume_id}")
 async def delete_resume(
     resume_id: str,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
-    user_id: str | None = None,
 ) -> dict:
     """Delete a tailored resume from Firestore."""
-    active_uid = user_id or x_user_id or "user_default"
-    success = resume_repo.delete_tailored_resume(resume_id=resume_id, user_id=active_uid)
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
+    existing = resume_repo.get_tailored_resume(resume_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Resume '{resume_id}' not found.")
+    if existing.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to resume.",
+        )
+    success = resume_repo.delete_tailored_resume(resume_id=resume_id, user_id=user_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete resume from Firestore.")
     return {"status": "deleted", "id": resume_id}

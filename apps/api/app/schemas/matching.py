@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas.job import CanonicalJob, CompensationRange, JobCategory, JobDescriptionBlock, WorkMode
 
-MatchTier = Literal["Strong", "Good", "Moderate", "Low", "Not a Match"]
+MatchTier = Literal["Strong", "Good", "Moderate", "Low", "Not a Match", "Unscored"]
 JobInteractionStatus = Literal["recommended", "saved", "applied", "archived"]
 
 
@@ -19,8 +19,8 @@ class ScoredJobOpportunity(BaseModel):
     category: JobCategory = "technical"
     employmentType: str
     seniority: str
-    fitScore: int = Field(ge=0, le=100)
-    matchTier: MatchTier
+    fitScore: int | None = Field(default=None, ge=0, le=100)
+    matchTier: MatchTier = "Unscored"
     fitReason: str
     matchedSkills: list[str] = Field(default_factory=list)
     missingSkills: list[str] = Field(default_factory=list)

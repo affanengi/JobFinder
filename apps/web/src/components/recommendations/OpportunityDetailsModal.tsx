@@ -35,8 +35,8 @@ export interface OpportunityDetailsDTO {
   category: 'technical' | 'data' | 'qa' | 'non_technical';
   employmentType: string;
   seniority: string;
-  fitScore: number;
-  matchTier: 'Strong' | 'Good' | 'Moderate' | 'Low' | 'Not a Match';
+  fitScore: number | null;
+  matchTier: 'Strong' | 'Good' | 'Moderate' | 'Low' | 'Not a Match' | 'Unscored';
   fitReason: string;
   matchedSkills: string[];
   missingSkills: string[];
@@ -60,7 +60,7 @@ interface OpportunityDetailsModalProps {
   onToggleSave: (job: OpportunityDetailsDTO) => void;
 }
 
-export function isValidExternalUrl(url?: string | null): boolean {
+function isValidExternalUrl(url?: string | null): boolean {
   if (!url) return false;
   try {
     const parsed = new URL(url);
@@ -226,7 +226,9 @@ export const OpportunityDetailsModal: React.FC<OpportunityDetailsModalProps> = (
           {/* Right Section: Match Score Badge & Close */}
           <div className="flex items-center gap-3 shrink-0">
             <div className={`px-3 py-1.5 rounded-xl border text-center flex flex-col items-center ${
-              job.fitScore >= 90
+              job.fitScore === null || job.fitScore === undefined
+                ? 'bg-neutral-800/60 border-neutral-700 text-neutral-400'
+                : job.fitScore >= 90
                 ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
                 : job.fitScore >= 75
                 ? 'bg-teal-500/10 border-teal-500/40 text-teal-400'
@@ -234,8 +236,10 @@ export const OpportunityDetailsModal: React.FC<OpportunityDetailsModalProps> = (
                 ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
                 : 'bg-rose-500/10 border-rose-500/40 text-rose-400'
             }`}>
-              <span className="text-xs font-mono font-bold leading-none">{job.fitScore}%</span>
-              <span className="text-[9px] font-mono uppercase tracking-wider opacity-80 mt-0.5">{job.matchTier}</span>
+              <span className="text-xs font-mono font-bold leading-none">
+                {job.fitScore !== null && job.fitScore !== undefined ? `${job.fitScore}%` : 'N/A'}
+              </span>
+              <span className="text-[9px] font-mono uppercase tracking-wider opacity-80 mt-0.5">{job.matchTier || 'Unscored'}</span>
             </div>
 
             <button
@@ -430,7 +434,7 @@ export const OpportunityDetailsModal: React.FC<OpportunityDetailsModalProps> = (
                     {snapshotResult && (
                       <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-[11px] font-mono text-emerald-400 flex items-center justify-between">
                         <span>ApplicationProfileSnapshot: {snapshotResult.id}</span>
-                        <span>{snapshotResult.selectedFactIds.length} facts referenced</span>
+                        <span>{snapshotResult.selectedFactIds?.length ?? 0} facts referenced</span>
                       </div>
                     )}
                   </div>
@@ -440,13 +444,13 @@ export const OpportunityDetailsModal: React.FC<OpportunityDetailsModalProps> = (
                     <h3 className="text-xs font-mono uppercase tracking-wider text-neutral-400 font-semibold flex items-center justify-between">
                       <span>Requirement-to-Profile Grounding</span>
                       <span>
-                        {matchData.strongMatches.length} Direct · {matchData.transferableMatches.length} Transferable · {matchData.missingRequirements.length} Missing
+                        {(matchData.strongMatches?.length ?? 0)} Direct · {(matchData.transferableMatches?.length ?? 0)} Transferable · {(matchData.missingRequirements?.length ?? 0)} Missing
                       </span>
                     </h3>
 
                     {/* Requirement Items */}
                     <div className="space-y-2.5">
-                      {matchData.matches.map((item) => (
+                      {(matchData.matches || []).map((item) => (
                         <div
                           key={item.requirementId}
                           className={`p-3.5 rounded-xl border text-xs space-y-2 ${

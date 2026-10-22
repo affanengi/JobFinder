@@ -5,9 +5,10 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 
+from app.core.auth import get_authenticated_user_id
 from app.db.repositories.cover_letter_repo import cover_letter_repo
 from app.schemas.application_artifacts import (
     GenerateArtifactsRequest,
@@ -32,8 +33,8 @@ router = APIRouter(tags=["Cover Letters & Application Artifacts"])
 @router.post("/artifacts/generate", response_model=GenerateArtifactsResponse)
 async def generate_application_artifacts(
     request: GenerateArtifactsRequest,
-    x_user_id: str | None = Header(default="user_default", alias="X-User-Id"),
-    user_id: str | None = None,
+    user_id: str = Depends(get_authenticated_user_id),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ):
     """Generate or retrieve ATS Resume and Cover Letter for target job.
     
@@ -41,12 +42,16 @@ async def generate_application_artifacts(
     - If already generated and forceRegenerate=False, loads saved docs from Firestore (0 Gemini calls).
     - If mode='both' and generation needed, generates BOTH documents in a single 1-shot Gemini request.
     """
-    active_uid = user_id or x_user_id or "user_default"
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     job = job_service.get_job(request.jobId)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job opportunity '{request.jobId}' not found.")
 
-    profile = profile_service.get_profile(user_id=active_uid)
+    profile = profile_service.get_profile(user_id=user_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Master Profile not found. Please create your profile first.")
 
@@ -69,23 +74,31 @@ async def generate_application_artifacts(
 
 @router.get("/cover-letters", response_model=list[TailoredCoverLetterDTO])
 async def list_cover_letters(
-    x_user_id: str | None = Header(default="user_default", alias="X-User-Id"),
-    user_id: str | None = None,
+    user_id: str = Depends(get_authenticated_user_id),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ):
     """List all tailored cover letters saved for the authenticated candidate."""
-    active_uid = user_id or x_user_id or "user_default"
-    return cover_letter_repo.list_for_user(user_id=active_uid)
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
+    return cover_letter_repo.list_for_user(user_id=user_id)
 
 
 @router.get("/cover-letters/job/{job_id}", response_model=TailoredCoverLetterDTO | None)
 async def get_cover_letter_for_job(
     job_id: str,
-    x_user_id: str | None = Header(default="user_default", alias="X-User-Id"),
-    user_id: str | None = None,
+    user_id: str = Depends(get_authenticated_user_id),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ):
     """Retrieve existing tailored cover letter from Firestore without AI call."""
-    active_uid = user_id or x_user_id or "user_default"
-    letter = cover_letter_repo.get_by_user_and_job(user_id=active_uid, job_id=job_id)
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
+    letter = cover_letter_repo.get_by_user_and_job(user_id=user_id, job_id=job_id)
     return letter
 
 
@@ -93,16 +106,25 @@ async def get_cover_letter_for_job(
 async def update_cover_letter(
     letter_id: str,
     request: UpdateCoverLetterRequest,
-    x_user_id: str | None = Header(default="user_default", alias="X-User-Id"),
-    user_id: str | None = None,
+    user_id: str = Depends(get_authenticated_user_id),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ):
     """Save manual edits to a cover letter (Zero AI calls)."""
-    active_uid = user_id or x_user_id or "user_default"
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     existing = cover_letter_repo.get_by_id(letter_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Cover letter '{letter_id}' not found.")
+    if existing.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to cover letter.",
+        )
 
-    profile = profile_service.get_profile(user_id=active_uid)
+    profile = profile_service.get_profile(user_id=user_id)
     val_result = cover_letter_validator.validate(request.content, profile)
     markdown_text = format_cover_letter_markdown(request.content)
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -126,14 +148,23 @@ async def update_cover_letter(
 @router.delete("/cover-letters/{letter_id}")
 async def delete_cover_letter(
     letter_id: str,
-    x_user_id: str | None = Header(default="user_default", alias="X-User-Id"),
-    user_id: str | None = None,
+    user_id: str = Depends(get_authenticated_user_id),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ):
     """Delete a tailored cover letter from Firestore."""
-    active_uid = user_id or x_user_id or "user_default"
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     existing = cover_letter_repo.get_by_id(letter_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Cover letter '{letter_id}' not found.")
+    if existing.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to cover letter.",
+        )
     
     success = cover_letter_repo.delete(letter_id)
     if not success:
@@ -142,11 +173,25 @@ async def delete_cover_letter(
 
 
 @router.get("/cover-letters/{letter_id}/pdf")
-async def download_cover_letter_pdf(letter_id: str):
+async def download_cover_letter_pdf(
+    letter_id: str,
+    user_id: str = Depends(get_authenticated_user_id),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+):
     """Render and stream deterministic ATS Cover Letter PDF using ReportLab (bash local cost)."""
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     letter = cover_letter_repo.get_by_id(letter_id)
     if not letter:
         raise HTTPException(status_code=404, detail=f"Cover letter '{letter_id}' not found.")
+    if letter.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to cover letter.",
+        )
 
     try:
         pdf_bytes = reportlab_cover_letter_renderer.render_to_bytes(letter.content)
@@ -164,11 +209,25 @@ async def download_cover_letter_pdf(letter_id: str):
 
 
 @router.get("/cover-letters/{letter_id}/tex")
-async def download_cover_letter_latex(letter_id: str):
+async def download_cover_letter_latex(
+    letter_id: str,
+    user_id: str = Depends(get_authenticated_user_id),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+):
     """Generate and download Overleaf-compatible LaTeX (.tex) source code (bash local cost)."""
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     letter = cover_letter_repo.get_by_id(letter_id)
     if not letter:
         raise HTTPException(status_code=404, detail=f"Cover letter '{letter_id}' not found.")
+    if letter.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to cover letter.",
+        )
 
     try:
         latex_code = cover_letter_latex_engine.generate_latex(letter.content)
@@ -186,11 +245,25 @@ async def download_cover_letter_latex(letter_id: str):
 
 
 @router.get("/cover-letters/{letter_id}/markdown")
-async def download_cover_letter_markdown(letter_id: str):
+async def download_cover_letter_markdown(
+    letter_id: str,
+    user_id: str = Depends(get_authenticated_user_id),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+):
     """Download tailored cover letter as clean Markdown."""
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     letter = cover_letter_repo.get_by_id(letter_id)
     if not letter:
         raise HTTPException(status_code=404, detail=f"Cover letter '{letter_id}' not found.")
+    if letter.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to cover letter.",
+        )
 
     sanitized_company = "".join(c for c in letter.content.companyName if c.isalnum() or c in ("-", "_")).strip()
     filename = f"Cover_Letter_{sanitized_company or 'Application'}.md"
@@ -203,7 +276,10 @@ async def download_cover_letter_markdown(letter_id: str):
 
 
 @router.post("/cover-letters/render-pdf-direct")
-async def render_cover_letter_pdf_direct(content: CoverLetterContent):
+async def render_cover_letter_pdf_direct(
+    content: CoverLetterContent,
+    user_id: str = Depends(get_authenticated_user_id),
+):
     """Render CoverLetterContent directly to streaming binary PDF bytes using ReportLab (bash local cost)."""
     try:
         pdf_bytes = reportlab_cover_letter_renderer.render_to_bytes(content)

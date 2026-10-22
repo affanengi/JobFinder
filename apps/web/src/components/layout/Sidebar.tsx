@@ -3,7 +3,6 @@ import {
   Sparkles, 
   Send, 
   FileText, 
-  BrainCircuit, 
   Settings, 
   LayoutDashboard,
   ShieldCheck,
@@ -33,18 +32,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'resumes', label: 'Resumes & Tailoring', icon: FileText },
     { id: 'scanner', label: 'ATS Scanner', icon: Gauge },
     { id: 'applications', label: 'Applications', icon: Send },
-    { id: 'memory', label: 'Memory & Facts', icon: BrainCircuit },
     { id: 'ai-activity', label: 'Recent AI Activities', icon: Activity },
     { id: 'settings', label: 'Preferences & Filters', icon: Settings },
   ];
 
-  const displayName = user?.displayName || 'Affan Razvi';
-  const initials = displayName
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2) || 'AR';
+  const displayName = user
+    ? (user.displayName || (user.email ? user.email.split('@')[0] : 'Candidate'))
+    : 'Guest Candidate';
+  const initials = user
+    ? (displayName.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || 'C')
+    : 'GC';
 
   return (
     <aside className="w-64 border-r border-white/40 bg-[#0D0D0D] flex flex-col h-screen select-none shrink-0">
@@ -111,14 +108,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="text-xs font-medium text-white truncate max-w-[120px]">
               {displayName}
             </span>
-            <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-mono">
-              <UserCheck size={10} className="text-emerald-400" />
-              Verified Profile
+            <span className={`text-[10px] flex items-center gap-1 font-mono ${user ? 'text-emerald-400' : 'text-[#A3A3A3]'}`}>
+              <UserCheck size={10} className={user ? 'text-emerald-400' : 'text-[#737373]'} />
+              {user ? 'Verified Profile' : 'Guest Mode'}
             </span>
           </div>
         </div>
-        <div className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/30">
-          Cloud Sync
+        <div className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+          user
+            ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+            : 'text-[#A3A3A3] bg-white/5 border-white/10'
+        }`}>
+          {user ? 'Cloud Sync' : 'Local Only'}
         </div>
       </div>
     </aside>

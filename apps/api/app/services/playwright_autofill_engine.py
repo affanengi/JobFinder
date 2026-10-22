@@ -1228,6 +1228,21 @@ class PlaywrightAutofillEngine:
 
         except asyncio.CancelledError:
             logger.info(f"Autofill session {session_id} cancelled.")
+            if context:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+            if browser:
+                try:
+                    await browser.close()
+                except Exception:
+                    pass
+            if playwright_mgr:
+                try:
+                    await playwright_mgr.stop()
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"Error in autofill lifecycle for session {session_id}: {e}", exc_info=True)
             await self.broadcast_event(

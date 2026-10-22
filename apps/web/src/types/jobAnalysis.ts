@@ -102,9 +102,14 @@ export interface AtsEvidenceAuditReport {
   resumeId?: string
   atsScore: number
   truthIntegrityStatus: 'VERIFIED' | 'VIOLATIONS_DETECTED'
-  evidenceAudit: AtsEvidenceItem[]
-  unsupportedKeywords: string[]
-  missingCriticalRequirements: string[]
-  omittedOpportunities: string[]
-  summary: string
+  evidenceAudit?: AtsEvidenceItem[]
+  items?: AtsEvidenceItem[]
+  keywordMatches?: string[]
+  evidenceMatches?: string[]
+  omittedOpportunities?: string[]
+  unsupportedKeywords?: string[]
+  missingRequirements?: string[]
+  missingCriticalRequirements?: string[]
+  summary?: string
+  auditedAt?: string
 }

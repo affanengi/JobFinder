@@ -166,9 +166,7 @@ async def get_health(
     summary="List available AI models",
     description="Retrieve the catalog of supported models across all registered provider adapters with capabilities and cost tiers.",
 )
-async def get_models(
-    user_id: str = Depends(get_authenticated_user_id),
-) -> list[ModelCatalogItemDTO]:
+async def get_models() -> list[ModelCatalogItemDTO]:
     return ai_settings_service.get_model_catalog()
 
 

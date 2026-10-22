@@ -6,10 +6,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 
 from pydantic import BaseModel
 
+from app.core.auth import get_authenticated_user_id
 from app.db.repositories.resume_repo import resume_repo
 from app.db.repositories.scan_report_repo import scan_report_repo
 from app.schemas.job_analysis import AtsEvidenceAuditReport
@@ -33,19 +34,28 @@ router = APIRouter(prefix="/scanner", tags=["ATS Resume Scanner & Keyword Matche
 @router.post("/scan-tailored", response_model=AtsScanResult)
 async def scan_tailored_resume(
     req: ScanTailoredRequest,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
-    user_id: Optional[str] = None,
 ) -> AtsScanResult:
     """
     Perform a 100% deterministic 100-Point ATS Scan on an existing saved tailored resume.
     Zero AI calls, sub-second execution.
     """
-    active_uid = user_id or x_user_id or "user_default"
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     resume = resume_repo.get_tailored_resume(req.resume_id)
     if not resume:
         raise HTTPException(
             status_code=404,
             detail=f"Tailored resume '{req.resume_id}' not found.",
+        )
+    if resume.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to resume.",
         )
 
     # Resolve target job if specified or linked on resume
@@ -168,11 +178,15 @@ async def bulk_ai_bullet_rewrite(
 @router.post("/reports", response_model=SavedScanReportDTO)
 async def save_scan_report(
     req: SaveScanReportRequest,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
-    user_id: Optional[str] = None,
 ) -> SavedScanReportDTO:
     """Save an immutable snapshot of an ATS scan result to Cloud Firestore."""
-    active_uid = user_id or x_user_id or "user_default"
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     now_iso = datetime.now(timezone.utc).isoformat()
     report_id = f"scan-rep-{uuid.uuid4().hex[:10]}"
 
@@ -204,7 +218,7 @@ async def save_scan_report(
 
     report_dto = SavedScanReportDTO(
         id=report_id,
-        userId=active_uid,
+        userId=user_id,
         reportName=default_name,
         sourceType=source_type,
         resumeId=res_id,
@@ -226,27 +240,40 @@ async def save_scan_report(
 
 @router.get("/reports", response_model=List[SavedScanReportDTO])
 async def list_saved_scan_reports(
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
-    user_id: Optional[str] = None,
 ) -> List[SavedScanReportDTO]:
     """List all saved ATS scan reports for authenticated candidate."""
-    active_uid = user_id or x_user_id or "user_default"
-    return scan_report_repo.list_reports_for_user(user_id=active_uid)
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
+    return scan_report_repo.list_reports_for_user(user_id=user_id)
 
 
 @router.get("/reports/{report_id}", response_model=SavedScanReportDTO)
 async def get_saved_scan_report(
     report_id: str,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
-    user_id: Optional[str] = None,
 ) -> SavedScanReportDTO:
     """Retrieve a single immutable saved ATS scan report."""
-    active_uid = user_id or x_user_id or "user_default"
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     report = scan_report_repo.get_report_by_id(report_id)
     if not report:
         raise HTTPException(
             status_code=404,
             detail=f"Saved ATS scan report '{report_id}' not found.",
+        )
+    if report.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to scan report.",
         )
     return report
 
@@ -254,16 +281,25 @@ async def get_saved_scan_report(
 @router.delete("/reports/{report_id}")
 async def delete_saved_scan_report(
     report_id: str,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
-    user_id: Optional[str] = None,
 ) -> dict:
     """Delete a saved ATS scan report."""
-    active_uid = user_id or x_user_id or "user_default"
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     report = scan_report_repo.get_report_by_id(report_id)
     if not report:
         raise HTTPException(
             status_code=404,
             detail=f"Saved ATS scan report '{report_id}' not found.",
+        )
+    if report.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to scan report.",
         )
     success = scan_report_repo.delete_report(report_id)
     if not success:
@@ -279,14 +315,23 @@ class ScanAtsEvidenceRequest(BaseModel):
 @router.post("/ats-evidence", response_model=AtsEvidenceAuditReport)
 async def audit_ats_evidence_endpoint(
     req: ScanAtsEvidenceRequest,
+    user_id: str = Depends(get_authenticated_user_id),
     x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
-    user_id: Optional[str] = None,
 ) -> AtsEvidenceAuditReport:
     """Audit ATS Evidence and decouple ATS Compatibility Score from Truth Integrity."""
-    active_uid = user_id or x_user_id or "user_default"
+    if x_user_id and x_user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Header X-User-Id does not match authenticated user.",
+        )
     resume = resume_repo.get_tailored_resume(req.resume_id)
     if not resume:
         raise HTTPException(status_code=404, detail=f"Tailored resume '{req.resume_id}' not found.")
+    if resume.userId != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized access to resume.",
+        )
 
     target_job_id = req.job_id or resume.jobId
     if not target_job_id or target_job_id == "general":
@@ -300,8 +345,8 @@ async def audit_ats_evidence_endpoint(
     from app.services.ats_evidence_auditor import ats_evidence_auditor
     from app.services.profile_service import profile_service
 
-    job_analysis = await job_analysis_service.analyze_job(job=job, user_id=active_uid)
-    profile = profile_service.get_profile(user_id=active_uid)
+    job_analysis = await job_analysis_service.analyze_job(job=job, user_id=user_id)
+    profile = profile_service.get_profile(user_id=user_id)
 
     return ats_evidence_auditor.audit_ats_evidence(
         resume=resume.structuredContent,

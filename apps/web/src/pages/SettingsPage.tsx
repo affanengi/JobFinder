@@ -27,13 +27,17 @@ import {
   Briefcase,
   Plus,
   Trash2,
-  Cpu
+  Cpu,
+  Lock,
+  Loader2,
 } from 'lucide-react'
 import { MOCK_VERIFIED_PROFILE } from '../data/mockUserFacts'
 import { fetchWithAuth } from '../lib/api'
 import { AutofillProfile, EducationEntry } from '../types/autofill'
-import { auth, onAuthStateChanged } from '../lib/firebase'
+import { useAuth } from '../context/AuthContext'
+import { useSync } from '../context/SyncContext'
 import { AiApiHubSettings } from '../components/settings/AiApiHubSettings'
+import { AuthModal } from '../components/auth/AuthModal'
 
 interface AutofillFormData {
   firstName: string
@@ -130,10 +134,18 @@ const PRONOUN_OPTIONS = [
 ]
 
 export function SettingsPage() {
+  const { user } = useAuth()
+  const { recordPersistenceSuccess, recordPersistenceFailure } = useSync()
   const [activeTab, setActiveTab] = useState<'autofill' | 'integrations' | 'ai-hub'>('autofill')
   const [copiedToken, setCopiedToken] = useState(false)
   const [copiedUrl, setCopiedUrl] = useState(false)
-  const clipToken = 'clp_live_affan_personal'
+  const [sessionToken, setSessionToken] = useState<string | null>(null)
+  const [isFetchingToken, setIsFetchingToken] = useState(false)
+  const [authModalConfig, setAuthModalConfig] = useState<{
+    isOpen: boolean
+    title?: string
+    subtitle?: string
+  }>({ isOpen: false })
   const apiUrl = 'http://localhost:8000'
 
   // Autofill Profile State
@@ -155,6 +167,15 @@ export function SettingsPage() {
     let isMounted = true
 
     async function loadAutofillProfile() {
+      if (!user) {
+        if (isMounted) {
+          setFormData(INITIAL_FORM_DATA)
+          setInitialData(INITIAL_FORM_DATA)
+          setIsLoading(false)
+          setIsDirty(false)
+        }
+        return
+      }
       setIsLoading(true)
       try {
         const res = await fetchWithAuth('/api/v1/profile/autofill')
@@ -242,20 +263,10 @@ export function SettingsPage() {
 
     loadAutofillProfile()
 
-    let unsubscribe = () => {}
-    if (auth && typeof onAuthStateChanged === 'function') {
-      unsubscribe = onAuthStateChanged(auth, () => {
-        if (isMounted) {
-          loadAutofillProfile()
-        }
-      })
-    }
-
     return () => {
       isMounted = false
-      unsubscribe()
     }
-  }, [])
+  }, [user])
 
   const copyToClipboard = (text: string, setCopied: (v: boolean) => void) => {
     navigator.clipboard.writeText(text)
@@ -312,8 +323,40 @@ export function SettingsPage() {
     }
   }
 
+  const handleGetSessionToken = async () => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Access Clipper Token',
+        subtitle: 'An authenticated account is required to generate a scoped web clipper session token.',
+      })
+      return
+    }
+    setIsFetchingToken(true)
+    try {
+      const token = await user.getIdToken()
+      setSessionToken(token)
+    } catch (err) {
+      console.error('Failed to retrieve session token:', err)
+      setStatusMessage({
+        type: 'error',
+        text: 'Failed to retrieve session token. Please re-authenticate.',
+      })
+    } finally {
+      setIsFetchingToken(false)
+    }
+  }
+
   // Explicit user action to prefill from Master Profile
   const handlePrefillFromMasterProfile = async () => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Prefill from Master Profile',
+        subtitle: 'An authenticated account is required to access your verified career truth.',
+      })
+      return
+    }
     setIsPrefilling(true)
     setStatusMessage(null)
     try {
@@ -465,6 +508,14 @@ export function SettingsPage() {
 
   const handleSaveAutofill = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Save Autofill Profile',
+        subtitle: 'An authenticated account is required to securely store and sync your autofill profile in the cloud.',
+      })
+      return
+    }
     setIsSaving(true)
     setStatusMessage(null)
 
@@ -509,6 +560,7 @@ export function SettingsPage() {
       })
 
       if (res.ok) {
+        recordPersistenceSuccess('Autofill configuration')
         setInitialData(formData)
         setIsDirty(false)
         setStatusMessage({
@@ -519,6 +571,7 @@ export function SettingsPage() {
           setStatusMessage(null)
         }, 5000)
       } else {
+        recordPersistenceFailure('Autofill configuration')
         const errorData = await res.json().catch(() => ({}))
         setStatusMessage({
           type: 'error',
@@ -527,6 +580,7 @@ export function SettingsPage() {
       }
     } catch (err) {
       console.error('Error saving autofill profile:', err)
+      recordPersistenceFailure('Autofill configuration', 'Network error during save.')
       setStatusMessage({
         type: 'error',
         text: 'Network error occurred while saving autofill configuration.',
@@ -589,6 +643,41 @@ export function SettingsPage() {
       {/* TAB 1: Autofill Configuration */}
       {activeTab === 'autofill' && (
         <div className="space-y-6 animate-in fade-in duration-150">
+          {/* Guest Sign-in Required Banner */}
+          {!user && (
+            <div className="bg-[#161616] border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 mt-0.5">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-white flex items-center gap-2">
+                    Sign In Required for Cloud Autofill
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 font-medium font-mono">
+                      Account Specific
+                    </span>
+                  </div>
+                  <p className="text-[#A3A3A3] mt-0.5 text-[11px] leading-relaxed max-w-xl">
+                    Contact details, personal demographic information, and Autofill configuration are account-specific. Sign in to securely sync your verified profile across devices and automate applications.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setAuthModalConfig({
+                    isOpen: true,
+                    title: 'Sign in to Enable Cloud Sync',
+                    subtitle: 'Sign in to save and sync your autofill configuration across all devices.',
+                  })
+                }
+                className="px-3 py-1.5 rounded-xl bg-white text-black font-semibold text-xs hover:bg-neutral-200 transition-colors cursor-pointer shrink-0"
+              >
+                Sign In to Enable Cloud Sync
+              </button>
+            </div>
+          )}
+
           {/* Informational Guidance Callout */}
           <div className="bg-surface p-4 rounded-xl border border-emerald-500/30 bg-gradient-to-br from-surface via-surface to-emerald-950/20 space-y-3">
             <div className="flex items-start justify-between gap-4">
@@ -1169,23 +1258,67 @@ export function SettingsPage() {
                 </code>
               </div>
 
-              <div className="bg-surface-subtle p-3 rounded-lg border border-border">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[11px] font-medium text-primary-secondary flex items-center gap-1.5">
-                    <Key className="w-3.5 h-3.5 text-emerald-400" /> Scoped Clip Token
-                  </span>
+              {!user ? (
+                <div className="bg-surface-subtle p-3.5 rounded-lg border border-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-primary-secondary flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-neutral-400" /> Scoped Clip Token
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700">
+                      Sign In Required
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#A3A3A3] leading-relaxed">
+                    Personal clipper tokens are tied exclusively to your authenticated account. Sign in to access your secure session token for the browser extension.
+                  </p>
                   <button
-                    onClick={() => copyToClipboard(clipToken, setCopiedToken)}
-                    className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors cursor-pointer"
+                    type="button"
+                    onClick={() =>
+                      setAuthModalConfig({
+                        isOpen: true,
+                        title: 'Sign in to Access Clipper Token',
+                        subtitle: 'An authenticated account is required to generate a scoped web clipper session token.',
+                      })
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-white text-black font-semibold text-xs hover:bg-neutral-200 transition-colors cursor-pointer inline-flex items-center gap-1.5"
                   >
-                    {copiedToken ? <CheckCircle2 className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                    {copiedToken ? 'Copied' : 'Copy'}
+                    <Lock className="w-3 h-3" />
+                    <span>Sign In to Access Token</span>
                   </button>
                 </div>
-                <code className="text-xs text-white font-mono bg-bg px-2 py-1 rounded block truncate border border-border/50">
-                  {clipToken}
-                </code>
-              </div>
+              ) : (
+                <div className="bg-surface-subtle p-3 rounded-lg border border-border">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-medium text-primary-secondary flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-emerald-400" /> Scoped Session Token
+                    </span>
+                    {sessionToken ? (
+                      <button
+                        onClick={() => copyToClipboard(sessionToken, setCopiedToken)}
+                        className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        {copiedToken ? <CheckCircle2 className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        {copiedToken ? 'Copied' : 'Copy'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleGetSessionToken}
+                        disabled={isFetchingToken}
+                        className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        {isFetchingToken ? <Loader2 className="w-3 h-3 animate-spin" /> : <Key className="w-3 h-3" />}
+                        <span>{isFetchingToken ? 'Retrieving...' : 'Reveal Session Token'}</span>
+                      </button>
+                    )}
+                  </div>
+                  <code className="text-xs text-white font-mono bg-bg px-2 py-1 rounded block truncate border border-border/50">
+                    {sessionToken || 'Click "Reveal Session Token" to display your authenticated token'}
+                  </code>
+                  <p className="text-[10px] text-neutral-400 mt-1">
+                    Authenticated session token for JobFinder extension. Matches backend Bearer token verification.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Installation Instructions */}
@@ -1254,6 +1387,13 @@ export function SettingsPage() {
 
       {/* TAB 3: AI / API Hub */}
       {activeTab === 'ai-hub' && <AiApiHubSettings />}
+
+      <AuthModal
+        isOpen={authModalConfig.isOpen}
+        onClose={() => setAuthModalConfig((prev) => ({ ...prev, isOpen: false }))}
+        title={authModalConfig.title}
+        subtitle={authModalConfig.subtitle}
+      />
     </div>
   )
 }

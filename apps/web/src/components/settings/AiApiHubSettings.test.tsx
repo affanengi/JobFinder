@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AiApiHubSettings } from './AiApiHubSettings'
+import { AuthProvider, mockTestUser } from '../../context/AuthContext'
 
 // Mock API client
 vi.mock('../../lib/api', () => ({
@@ -231,8 +232,15 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
     })
   })
 
+  const renderHub = (user: any = mockTestUser) =>
+    render(
+      <AuthProvider initialUser={user}>
+        <AiApiHubSettings />
+      </AuthProvider>
+    )
+
   it('renders the compact header and status strip with live metrics', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     expect(screen.getByText('AI / API Hub')).toBeDefined()
     expect(screen.getByText('Manage your AI providers, credentials and routing.')).toBeDefined()
@@ -246,7 +254,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('switches provider tabs and shows contextual credentials, empty states, and guidance', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(within(screen.getByTestId('credentials-table')).getByText('My Gemini Key')).toBeDefined()
@@ -286,7 +294,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('opens provider-specific credential modal using shared portal with contextual fields and read-only provider indicator', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(within(screen.getByTestId('credentials-table')).getByText('My Gemini Key')).toBeDefined()
@@ -327,7 +335,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('submits a new credential to POST /api/v1/ai/credentials', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(within(screen.getByTestId('credentials-table')).getByText('My Gemini Key')).toBeDefined()
@@ -357,7 +365,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('deletes credential using shared DeleteConfirmModal', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(within(screen.getByTestId('credentials-table')).getByText('My Gemini Key')).toBeDefined()
@@ -386,7 +394,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('toggles credential active status via PATCH /api/v1/ai/credentials/:id/status', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(within(screen.getByTestId('credentials-table')).getByText('My Gemini Key')).toBeDefined()
@@ -407,7 +415,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('tests connection probe via POST /api/v1/ai/credentials/:id/probe', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(within(screen.getByTestId('credentials-table')).getByText('My Gemini Key')).toBeDefined()
@@ -428,7 +436,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('renders the visual task routing map with animated connections and handles preference change', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(screen.getByText('Task Routing Map')).toBeDefined()
@@ -452,7 +460,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('changes cost policy and conditionally reveals paid fallback toggle', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(screen.getByText('Free Only')).toBeDefined()
@@ -480,7 +488,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('renders sticky sidebar with System Status and How Routing Works details modal', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(screen.getByText('System Status')).toBeDefined()
@@ -502,7 +510,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('opens Model Catalog modal with sticky opaque header, search filter, and catalog disclaimer', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(screen.getByText('Model Catalog')).toBeDefined()
@@ -521,7 +529,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('renders AI Usage activity and handles refresh', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(screen.getByText('Recent AI Activity')).toBeDefined()
@@ -538,7 +546,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('persists route removal when reset to auto is triggered and omits the key from payload', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(screen.getByText('Task Routing Map')).toBeDefined()
@@ -589,7 +597,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
       return Promise.resolve({ ok: true, json: async () => ({}) } as Response)
     })
 
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(screen.getByText('Task Routing Map')).toBeDefined()
@@ -605,7 +613,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
   })
 
   it('opens edit credential modal, pre-populates existing values, and submits updates via PUT', async () => {
-    render(<AiApiHubSettings />)
+    renderHub()
 
     await waitFor(() => {
       expect(within(screen.getByTestId('credentials-table')).getByText('My Gemini Key')).toBeDefined()
@@ -660,6 +668,65 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
       expect(within(screen.getByTestId('credentials-table')).getByText('Renamed Gemini Key')).toBeDefined()
       expect(screen.queryByText('Edit Credential')).toBeNull()
     })
+  })
+
+  it('suppresses protected credentials, settings, health, and telemetry requests when signed out', async () => {
+    renderHub(null)
+
+    // Verify public models endpoint is called
+    await waitFor(() => {
+      expect(fetchWithAuth).toHaveBeenCalledWith('/api/v1/ai/models')
+    })
+
+    // Verify protected endpoints are NOT called
+    expect(fetchWithAuth).not.toHaveBeenCalledWith('/api/v1/ai/credentials')
+    expect(fetchWithAuth).not.toHaveBeenCalledWith('/api/v1/ai/settings')
+    expect(fetchWithAuth).not.toHaveBeenCalledWith('/api/v1/ai/health')
+    expect(fetchWithAuth).not.toHaveBeenCalledWith('/api/v1/ai/telemetry')
+  })
+
+  it('displays guest onboarding banner with verified AES-256-GCM encryption guarantee and opens AuthModal', async () => {
+    renderHub(null)
+
+    // Verify guest banner with AES-256-GCM text exists
+    const banner = screen.getByTestId('ai-hub-guest-banner')
+    expect(banner).toBeDefined()
+    expect(within(banner).getByText('Private AI Hub Vault')).toBeDefined()
+    expect(within(banner).getByText(/AES-256-GCM/i)).toBeDefined()
+
+    // Click "Sign in to Configure"
+    const configureBtn = within(banner).getByRole('button', { name: /Sign in to Configure/i })
+    fireEvent.click(configureBtn)
+
+    // Verify AuthModal is opened with contextual copy
+    await waitFor(() => {
+      expect(screen.getByText('Sign in to Configure AI Hub')).toBeDefined()
+    })
+
+    // Ensure no credentials mutation occurred
+    expect(fetchWithAuth).not.toHaveBeenCalledWith(
+      '/api/v1/ai/credentials',
+      expect.objectContaining({ method: 'POST' })
+    )
+  })
+
+  it('prevents guest from adding credentials and triggers contextual AuthModal', async () => {
+    renderHub(null)
+
+    // Find and click the Add Gemini Credential button
+    const addKeyBtns = await screen.findAllByRole('button', { name: /Add Gemini Credential/i })
+    fireEvent.click(addKeyBtns[0])
+
+    // Verify AuthModal opens with vault scoping message
+    await waitFor(() => {
+      expect(screen.getByText('Sign in to Add AI Credentials')).toBeDefined()
+    })
+
+    // Ensure no POST request was sent
+    expect(fetchWithAuth).not.toHaveBeenCalledWith(
+      '/api/v1/ai/credentials',
+      expect.objectContaining({ method: 'POST' })
+    )
   })
 })
 

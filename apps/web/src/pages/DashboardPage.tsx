@@ -21,8 +21,11 @@ import { ScoreIndicator } from '../components/recommendations/ScoreIndicator';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { fetchWithAuth } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 import { ApplicationRecord } from '../types/application';
 import { getRelativeTimeLabel } from '../components/applications/dateFilterUtils';
+import { AuthModal } from '../components/auth/AuthModal';
+import { SyncStatusBadge } from '../components/common/SyncStatusBadge';
 
 interface ScoredJob {
   id: string;
@@ -33,10 +36,13 @@ interface ScoredJob {
   status?: string;
   requiredSkills?: string[];
   recommendation?: {
-    score: number;
+    score: number | null;
     category: any;
     reasoning?: string;
   };
+  fitScore?: number | null;
+  matchTier?: string;
+  fitReason?: string;
 }
 
 interface ProfileSummary {
@@ -75,6 +81,7 @@ export function DashboardPage({
   onNavigateToOpportunities,
   onNavigateToTab,
 }: DashboardPageProps) {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<ProfileSummary | null>(null);
   const [recommendations, setRecommendations] = useState<ScoredJob[]>([]);
@@ -87,10 +94,36 @@ export function DashboardPage({
     aiHealthy: true,
   });
   const [actionSuccessAppId, setActionSuccessAppId] = useState<string | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true);
     try {
+      if (!user) {
+        // Guest mode: ONLY fetch public / optional-auth recommendations
+        const recsRes = await fetchWithAuth('/api/v1/recommendations')
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => []);
+
+        setProfile(null);
+        setApplications([]);
+        setToolkit({
+          resumesCount: 0,
+          latestScan: null,
+          aiCredentialsCount: 0,
+          aiProvidersCount: 0,
+          aiHealthy: true,
+        });
+
+        if (Array.isArray(recsRes)) {
+          setRecommendations(recsRes);
+        } else {
+          setRecommendations([]);
+        }
+        return;
+      }
+
+      // Authenticated mode: fetch profile, recommendations, applications, and toolkit telemetry
       const [
         profileRes,
         recsRes,
@@ -150,6 +183,23 @@ export function DashboardPage({
     } finally {
       setLoading(false);
     }
+  }, [user]);
+
+  useEffect(() => {
+    const handleLogout = () => {
+      setProfile(null);
+      setRecommendations([]);
+      setApplications([]);
+      setToolkit({
+        resumesCount: 0,
+        latestScan: null,
+        aiCredentialsCount: 0,
+        aiProvidersCount: 0,
+        aiHealthy: false,
+      });
+    };
+    window.addEventListener('jobfinder:logout', handleLogout);
+    return () => window.removeEventListener('jobfinder:logout', handleLogout);
   }, []);
 
   useEffect(() => {
@@ -168,7 +218,7 @@ export function DashboardPage({
   // 1. High-Fit Matches (Score >= 80% and unapplied)
   const highFitCount = useMemo(() => {
     return recommendations.filter(
-      (j) => (!j.status || j.status === 'recommended') && (j.recommendation?.score ?? 0) >= 80
+      (j) => (!j.status || j.status === 'recommended') && ((j.fitScore ?? j.recommendation?.score ?? 0) >= 80)
     ).length;
   }, [recommendations]);
 
@@ -208,7 +258,11 @@ export function DashboardPage({
   const topMatches = useMemo(() => {
     return recommendations
       .filter((j) => !j.status || j.status === 'recommended')
-      .sort((a, b) => (b.recommendation?.score ?? 0) - (a.recommendation?.score ?? 0))
+      .sort((a, b) => {
+        const scoreA = a.fitScore ?? a.recommendation?.score ?? -1;
+        const scoreB = b.fitScore ?? b.recommendation?.score ?? -1;
+        return scoreB - scoreA;
+      })
       .slice(0, 3);
   }, [recommendations]);
 
@@ -245,10 +299,113 @@ export function DashboardPage({
     }
   };
 
-  const firstName = profile?.fullName ? profile.fullName.split(' ')[0] : 'Candidate';
+  const firstName = profile?.fullName
+    ? profile.fullName.split(' ')[0]
+    : user?.displayName
+    ? user.displayName.split(' ')[0]
+    : user?.email
+    ? user.email.split('@')[0]
+    : 'Candidate';
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto p-4 md:p-8 animate-in fade-in duration-150">
+      {/* Public Welcome Banner (Signed-out Experience) */}
+      {!user && (
+        <div className="bg-gradient-to-r from-emerald-950/40 via-neutral-900 to-neutral-900 rounded-2xl border border-emerald-500/30 p-6 md:p-7 shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="space-y-2 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Public Discovery Mode Active</span>
+            </div>
+            <h2 className="text-xl md:text-2xl font-bold text-white tracking-tight">
+              Welcome to JobFinder Career Intelligence
+            </h2>
+            <p className="text-xs md:text-sm text-neutral-300 leading-relaxed">
+              Autonomous job aggregation, verified ATS tailoring, and honest match scoring. Sign in to sync your verified Master Profile across devices and unlock deterministic fit calculations without hallucinations.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <button
+              onClick={() => setIsAuthModalOpen(true)}
+              className="px-4 py-2.5 rounded-xl bg-white hover:bg-neutral-200 text-black text-xs font-bold transition-all shadow-md inline-flex items-center gap-2 cursor-pointer"
+            >
+              <span>Sign In / Create Account</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onNavigateToOpportunities}
+              className="px-4 py-2.5 rounded-xl border border-neutral-700 hover:bg-neutral-800 text-neutral-200 text-xs font-medium transition-all inline-flex items-center gap-2 cursor-pointer"
+            >
+              <span>Explore Opportunities</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Onboarding Readiness Card (Honest Matching & Evidence Requirement) */}
+      {user && !loading && (!profile || profile.skillsCount === 0) && (
+        <div className="bg-amber-950/20 border border-amber-500/30 rounded-2xl p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Profile Setup Incomplete · Honest Matching Active</h3>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  Job opportunities are shown in <span className="text-amber-400 font-semibold font-mono">Unscored</span> mode until you provide verified career facts.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => navigateTo('profile')}
+              className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-black text-xs font-bold transition-all shadow-md shadow-amber-500/20 inline-flex items-center gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
+            >
+              <span>Complete Master Profile</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-amber-500/20 text-xs">
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
+              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                profile && profile.skillsCount > 0 ? 'bg-emerald-500 text-black' : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+              }`}>
+                {profile && profile.skillsCount > 0 ? '✓' : '1'}
+              </span>
+              <div>
+                <div className="font-semibold text-neutral-200">Verified Skills</div>
+                <div className="text-[11px] text-neutral-400 mt-0.5">At least 1 verified skill required for fit intelligence.</div>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
+              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                profile && profile.experiencesCount > 0 ? 'bg-emerald-500 text-black' : 'bg-neutral-800 text-neutral-400 border border-neutral-700'
+              }`}>
+                {profile && profile.experiencesCount > 0 ? '✓' : '2'}
+              </span>
+              <div>
+                <div className="font-semibold text-neutral-200">Experience or Projects</div>
+                <div className="text-[11px] text-neutral-400 mt-0.5">Empowers zero-hallucination ATS resume tailoring.</div>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-neutral-900/60 border border-neutral-800">
+              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                toolkit.aiCredentialsCount > 0 ? 'bg-emerald-500 text-black' : 'bg-neutral-800 text-neutral-400 border border-neutral-700'
+              }`}>
+                {toolkit.aiCredentialsCount > 0 ? '✓' : '3'}
+              </span>
+              <div>
+                <div className="font-semibold text-neutral-200">AI API Key</div>
+                <div className="text-[11px] text-neutral-400 mt-0.5">Connect Gemini, OpenAI, Claude, or Ollama in settings.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 1. Command Header */}
       <div className="bg-surface rounded-2xl border border-border p-6 md:p-8 shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -257,10 +414,7 @@ export function DashboardPage({
             <span>Autonomous Discovery Active · Human-Controlled Execution</span>
           </div>
 
-          <div className="inline-flex items-center gap-2 text-xs font-medium text-neutral-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-neutral-300">Firestore Synced • AI Hub Active</span>
-          </div>
+          <SyncStatusBadge variant="dashboard" />
         </div>
 
         <div className="pt-1">
@@ -541,10 +695,10 @@ export function DashboardPage({
                 </div>
 
                 <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end shrink-0">
-                  {job.recommendation && (
+                  {(job.fitScore !== undefined || job.recommendation) && (
                     <ScoreIndicator
-                      score={job.recommendation.score}
-                      category={job.recommendation.category}
+                      score={job.fitScore ?? job.recommendation?.score}
+                      category={(job.matchTier as any) || job.recommendation?.category}
                       size="sm"
                     />
                   )}
@@ -738,6 +892,8 @@ export function DashboardPage({
           </div>
         </div>
       </div>
+
+      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
     </div>
   );
 }

@@ -7,9 +7,11 @@ import { useAuth } from '../../context/AuthContext';
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  title?: string;
+  subtitle?: string;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, title, subtitle }) => {
   const { loginWithGoogle, loginWithEmail, signupWithEmail } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -88,15 +90,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             </div>
             <div>
               <h2 className="text-sm font-semibold text-white">
-                {isSignUp ? 'Create your jobFinder Account' : 'Sign in to jobFinder'}
+                {title ? title : isSignUp ? 'Create your jobFinder Account' : 'Sign in to jobFinder'}
               </h2>
               <p className="text-[11px] text-[#A3A3A3]">
-                Sync your verified profile facts & opportunities across devices.
+                {subtitle ? subtitle : 'Sync your verified profile facts & opportunities across devices.'}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
+            aria-label="Close modal"
             className="p-1 rounded-lg text-[#A3A3A3] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />

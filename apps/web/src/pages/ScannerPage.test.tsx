@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ScannerPage } from "./ScannerPage";
-import { AuthProvider } from "../context/AuthContext";
+import { AuthProvider, mockTestUser } from "../context/AuthContext";
 
 // Mock api
 vi.mock("../lib/api", () => ({
@@ -258,12 +258,15 @@ describe("ScannerPage ATS Evaluation Suite", () => {
     });
   });
 
-  it("renders scanner page header and configuration targets", async () => {
+  const renderScanner = (user: any = mockTestUser, initialResumeId?: string) =>
     render(
-      <AuthProvider>
-        <ScannerPage />
+      <AuthProvider initialUser={user}>
+        <ScannerPage initialResumeId={initialResumeId} />
       </AuthProvider>
     );
+
+  it("renders scanner page header and configuration targets", async () => {
+    renderScanner();
 
     expect(screen.getByText("ATS Resume Scanner & Keyword Match")).toBeInTheDocument();
     expect(screen.getByText("Live ATS Scanner")).toBeInTheDocument();
@@ -277,11 +280,7 @@ describe("ScannerPage ATS Evaluation Suite", () => {
   });
 
   it("executes ATS scan, displays hero score, and handles save report button", async () => {
-    render(
-      <AuthProvider>
-        <ScannerPage initialResumeId="res_abc_1" />
-      </AuthProvider>
-    );
+    renderScanner(mockTestUser, "res_abc_1");
 
     await waitFor(() => {
       expect(screen.getByText("88")).toBeInTheDocument();
@@ -301,11 +300,7 @@ describe("ScannerPage ATS Evaluation Suite", () => {
   });
 
   it("allows switching to Ephemeral Upload tab and maintains isolated state", async () => {
-    render(
-      <AuthProvider>
-        <ScannerPage />
-      </AuthProvider>
-    );
+    renderScanner();
 
     const uploadTabBtn = screen.getByText(/Upload Any Resume/i);
     fireEvent.click(uploadTabBtn);
@@ -315,11 +310,7 @@ describe("ScannerPage ATS Evaluation Suite", () => {
   });
 
   it("switches to Saved Reports hub tab and displays saved snapshots", async () => {
-    render(
-      <AuthProvider>
-        <ScannerPage />
-      </AuthProvider>
-    );
+    renderScanner();
 
     const savedReportsTab = await screen.findByText(/Saved Reports/i);
     fireEvent.click(savedReportsTab);
@@ -331,11 +322,7 @@ describe("ScannerPage ATS Evaluation Suite", () => {
   });
 
   it("selects bullets, opens modal, and applies selected to resume with direct recompile ($0 AI cost)", async () => {
-    render(
-      <AuthProvider>
-        <ScannerPage initialResumeId="res_abc_1" />
-      </AuthProvider>
-    );
+    renderScanner(mockTestUser, "res_abc_1");
 
     await waitFor(() => {
       expect(screen.getByText("Architected distributed microservices in FastAPI reducing p99 latency by 45%.")).toBeInTheDocument();
@@ -361,5 +348,18 @@ describe("ScannerPage ATS Evaluation Suite", () => {
     await waitFor(() => {
       expect(screen.getByText(/Applied optimized bullets and recompiled PDF locally/i)).toBeInTheDocument();
     });
+  });
+
+  it("allows guest ATS scanning without requesting private resumes or reports", async () => {
+    renderScanner(null);
+
+    // Verify protected endpoints are NOT called
+    expect(fetchWithAuth).not.toHaveBeenCalledWith("/api/v1/resumes");
+    expect(fetchWithAuth).not.toHaveBeenCalledWith("/api/v1/scanner/reports");
+
+    // Guest can still switch to Upload Any Resume for ephemeral scanning
+    const uploadTabBtn = screen.getByText(/Upload Any Resume/i);
+    fireEvent.click(uploadTabBtn);
+    expect(screen.getByText(/100% In-Memory Ephemeral Scan/i)).toBeInTheDocument();
   });
 });

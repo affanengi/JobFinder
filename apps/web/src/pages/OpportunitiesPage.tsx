@@ -25,6 +25,8 @@ import { AddJobModal, CanonicalJobDTO } from '../components/recommendations/AddJ
 import { ThemeDropdown } from '../components/common/ThemeDropdown';
 import { fetchWithAuth } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { useSync } from '../context/SyncContext';
+import { AuthModal } from '../components/auth/AuthModal';
 import { ResumeStudioModal } from '../components/resume/ResumeStudioModal';
 import { DeleteConfirmModal } from '../components/ui/DeleteConfirmModal';
 import { CompanyFilterRibbon, CompanyMetric, getCanonicalCompanyInfo } from '../components/recommendations/CompanyFilterRibbon';
@@ -40,8 +42,8 @@ interface ScoredOpportunityDTO {
   category: 'technical' | 'data' | 'qa' | 'non_technical';
   employmentType: string;
   seniority: string;
-  fitScore: number;
-  matchTier: 'Strong' | 'Good' | 'Moderate' | 'Low' | 'Not a Match';
+  fitScore: number | null;
+  matchTier: 'Strong' | 'Good' | 'Moderate' | 'Low' | 'Not a Match' | 'Unscored';
   fitReason: string;
   matchedSkills: string[];
   missingSkills: string[];
@@ -78,6 +80,7 @@ const SCORE_OPTIONS = [
   { value: '75', label: 'Good (75%+)' },
   { value: '50', label: 'Moderate (50%+)' },
   { value: '35', label: 'Low (35%+)' },
+  { value: 'unscored', label: 'Unscored (Incomplete Profile)' },
 ];
 
 interface OpportunitiesPageProps {
@@ -86,6 +89,12 @@ interface OpportunitiesPageProps {
 
 export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountChange }) => {
   const { user } = useAuth();
+  const { recordPersistenceSuccess, recordPersistenceFailure } = useSync();
+  const [authModalConfig, setAuthModalConfig] = useState<{
+    isOpen: boolean;
+    title?: string;
+    subtitle?: string;
+  }>({ isOpen: false });
   const [opportunities, setOpportunities] = useState<ScoredOpportunityDTO[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'recommended' | 'saved' | 'applied' | 'archived'>('recommended');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -140,6 +149,14 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
   }, [user]);
 
   const handleRunDiscovery = async () => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Run Discovery',
+        subtitle: 'An authenticated account is required to execute automated crawler discovery.',
+      });
+      return;
+    }
     setIsDiscovering(true);
     try {
       const res = await fetchWithAuth('/api/v1/jobs/discover', {
@@ -154,10 +171,12 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
         throw new Error('Discovery request failed');
       }
 
+      recordPersistenceSuccess('Live crawler discovery');
       await fetchRecommendations();
       showToast('Live discovery complete! Ingested jobs across Ashby, Lever & Greenhouse.');
     } catch (err) {
       console.error(err);
+      recordPersistenceFailure('Live crawler discovery');
       showToast('Error running live discovery. Please try again.');
     } finally {
       setIsDiscovering(false);
@@ -165,11 +184,23 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
   };
 
   const handleJobAdded = async (newJob: CanonicalJobDTO) => {
+    recordPersistenceSuccess('Manual opportunity added');
     await fetchRecommendations();
     showToast(`Added "${newJob.title}" at ${newJob.company}! Scored against your verified profile.`);
   };
 
   const updateStatus = async (id: string, newStatus: 'recommended' | 'saved' | 'applied' | 'archived') => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: newStatus === 'saved' ? 'Sign in to Save Opportunity' : 'Sign in to Track Opportunity',
+        subtitle: newStatus === 'saved'
+          ? 'An authenticated account is required to save opportunities to your personal pipeline.'
+          : 'An authenticated account is required to update opportunity tracking.',
+      });
+      return;
+    }
+
     setOpportunities((prev) => {
       const updated = prev.map((item) => (item.id === id ? { ...item, status: newStatus } : item));
       if (onCountChange) {
@@ -179,12 +210,19 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
     });
 
     try {
-      await fetchWithAuth(`/api/v1/recommendations/${id}/status`, {
+      const res = await fetchWithAuth(`/api/v1/recommendations/${id}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
 
+      if (!res.ok) {
+        recordPersistenceFailure('Opportunity status update');
+        showToast('Failed to save status to server.');
+        return;
+      }
+
+      recordPersistenceSuccess(`Opportunity ${newStatus}`);
       if (newStatus === 'saved') {
         showToast('Saved opportunity to Cloud Firestore!');
       } else if (newStatus === 'archived') {
@@ -194,11 +232,20 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
       }
     } catch (err) {
       console.error('Failed to save status to Firestore:', err);
+      recordPersistenceFailure('Opportunity status update');
       showToast('Failed to save status to server.');
     }
   };
 
   const handleOpenResumeStudio = (job: ScoredOpportunityDTO) => {
+    if (!user) {
+      setAuthModalConfig({
+        isOpen: true,
+        title: 'Sign in to Tailor Resume',
+        subtitle: 'An authenticated account is required to tailor a grounded resume against your verified Master Profile.',
+      });
+      return;
+    }
     setSelectedJobForResume(job);
     setIsResumeModalOpen(true);
   };
@@ -258,10 +305,11 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
       return false;
     }
 
-    if (selectedScoreFilter === '90' && item.fitScore < 90) return false;
-    if (selectedScoreFilter === '75' && item.fitScore < 75) return false;
-    if (selectedScoreFilter === '50' && item.fitScore < 50) return false;
-    if (selectedScoreFilter === '35' && item.fitScore < 35) return false;
+    if (selectedScoreFilter === '90' && (item.fitScore === null || item.fitScore < 90)) return false;
+    if (selectedScoreFilter === '75' && (item.fitScore === null || item.fitScore < 75)) return false;
+    if (selectedScoreFilter === '50' && (item.fitScore === null || item.fitScore < 50)) return false;
+    if (selectedScoreFilter === '35' && (item.fitScore === null || item.fitScore < 35)) return false;
+    if (selectedScoreFilter === 'unscored' && item.fitScore !== null) return false;
 
     return true;
   });
@@ -499,32 +547,45 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
 
                     {/* Match Score Badge */}
                     <div className="flex flex-col items-end shrink-0">
-                      <div className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold border ${
-                        job.fitScore >= 90
-                          ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
-                          : job.fitScore >= 75
-                          ? 'bg-teal-500/10 border-teal-500/40 text-teal-400'
-                          : job.fitScore >= 50
-                          ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
-                          : job.fitScore >= 35
-                          ? 'bg-rose-500/10 border-rose-500/40 text-rose-400'
-                          : 'bg-neutral-800/80 border-neutral-700/80 text-neutral-400'
-                      }`}>
-                        {job.fitScore}%
-                      </div>
-                      <span className={`text-[10px] font-mono mt-0.5 ${
-                        job.fitScore >= 90 
-                          ? 'text-emerald-400' 
-                          : job.fitScore >= 75 
-                          ? 'text-teal-400' 
-                          : job.fitScore >= 50 
-                          ? 'text-amber-400' 
-                          : job.fitScore >= 35 
-                          ? 'text-rose-400' 
-                          : 'text-neutral-500'
-                      }`}>
-                        • {job.matchTier?.includes('Match') ? job.matchTier : `${job.matchTier} Match`}
-                      </span>
+                      {job.fitScore !== null && job.fitScore !== undefined ? (
+                        <>
+                          <div className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold border ${
+                            job.fitScore >= 90
+                              ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+                              : job.fitScore >= 75
+                              ? 'bg-teal-500/10 border-teal-500/40 text-teal-400'
+                              : job.fitScore >= 50
+                              ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
+                              : job.fitScore >= 35
+                              ? 'bg-rose-500/10 border-rose-500/40 text-rose-400'
+                              : 'bg-neutral-800/80 border-neutral-700/80 text-neutral-400'
+                          }`}>
+                            {job.fitScore}%
+                          </div>
+                          <span className={`text-[10px] font-mono mt-0.5 ${
+                            job.fitScore >= 90 
+                              ? 'text-emerald-400' 
+                              : job.fitScore >= 75 
+                              ? 'text-teal-400' 
+                              : job.fitScore >= 50 
+                              ? 'text-amber-400' 
+                              : job.fitScore >= 35 
+                              ? 'text-rose-400' 
+                              : 'text-neutral-500'
+                          }`}>
+                            • {job.matchTier?.includes('Match') ? job.matchTier : `${job.matchTier} Match`}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <div className="px-2.5 py-1 rounded-xl text-xs font-mono font-semibold border bg-white/5 border-white/10 text-neutral-400">
+                            Unscored
+                          </div>
+                          <span className="text-[10px] font-mono mt-0.5 text-neutral-500">
+                            • Profile Incomplete
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -652,6 +713,7 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
                           : 'border-white/10 text-[#A3A3A3] hover:text-white hover:bg-white/5'
                       }`}
                       title={job.status === 'saved' ? 'Remove from saved' : 'Save opportunity'}
+                      aria-label={job.status === 'saved' ? `Remove ${job.title} from saved` : `Save ${job.title}`}
                     >
                       <Bookmark className="w-3.5 h-3.5" />
                     </button>
@@ -783,19 +845,25 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
 
                 {/* Right Section: Match Score & Action Buttons */}
                 <div className="flex items-center gap-2.5 shrink-0 self-end md:self-center">
-                  <span className={`px-2 py-0.5 rounded-lg text-xs font-mono font-bold border ${
-                    job.fitScore >= 90
-                      ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
-                      : job.fitScore >= 75
-                      ? 'bg-teal-500/10 border-teal-500/40 text-teal-400'
-                      : job.fitScore >= 50
-                      ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
-                      : job.fitScore >= 35
-                      ? 'bg-rose-500/10 border-rose-500/40 text-rose-400'
-                      : 'bg-neutral-800/80 border-neutral-700/80 text-neutral-400'
-                  }`}>
-                    {job.fitScore}%
-                  </span>
+                  {job.fitScore !== null && job.fitScore !== undefined ? (
+                    <span className={`px-2 py-0.5 rounded-lg text-xs font-mono font-bold border ${
+                      job.fitScore >= 90
+                        ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+                        : job.fitScore >= 75
+                        ? 'bg-teal-500/10 border-teal-500/40 text-teal-400'
+                        : job.fitScore >= 50
+                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-400'
+                        : job.fitScore >= 35
+                        ? 'bg-rose-500/10 border-rose-500/40 text-rose-400'
+                        : 'bg-neutral-800/80 border-neutral-700/80 text-neutral-400'
+                    }`}>
+                      {job.fitScore}%
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-lg text-xs font-mono font-semibold border bg-white/5 border-white/10 text-neutral-400">
+                      Unscored
+                    </span>
+                  )}
 
                   <button
                     onClick={(e) => {
@@ -820,6 +888,7 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
                         : 'border-white/10 text-[#A3A3A3] hover:text-white hover:bg-white/5'
                     }`}
                     title={job.status === 'saved' ? 'Remove from saved' : 'Save opportunity'}
+                    aria-label={job.status === 'saved' ? `Remove ${job.title} from saved` : `Save ${job.title}`}
                   >
                     <Bookmark className="w-3.5 h-3.5" />
                   </button>
@@ -909,6 +978,13 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
           onClose={() => setJobToDismiss(null)}
         />
       )}
+
+      <AuthModal
+        isOpen={authModalConfig.isOpen}
+        onClose={() => setAuthModalConfig((prev) => ({ ...prev, isOpen: false }))}
+        title={authModalConfig.title}
+        subtitle={authModalConfig.subtitle}
+      />
     </div>
   );
 };

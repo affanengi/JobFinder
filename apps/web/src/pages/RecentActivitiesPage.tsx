@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { fetchWithAuth } from '../lib/api';
 import { Modal } from '../components/ui/Modal';
+import { useAuth } from '../context/AuthContext';
+import { AuthRequiredEmptyState } from '../components/common/AuthRequiredEmptyState';
 
 export interface HopDetail {
   provider: string;
@@ -102,6 +104,7 @@ const PROVIDER_OPTIONS = [
 ];
 
 export const RecentActivitiesPage: React.FC = () => {
+  const { user } = useAuth();
   const [summary, setSummary] = useState<TelemetrySummary | null>(null);
   const [credentials, setCredentials] = useState<CredentialMeta[]>([]);
   const [executions, setExecutions] = useState<ExecutionItem[]>([]);
@@ -137,6 +140,10 @@ export const RecentActivitiesPage: React.FC = () => {
 
   // Load credentials once to map friendly names
   useEffect(() => {
+    if (!user) {
+      setCredentials([]);
+      return;
+    }
     fetchWithAuth('/api/v1/ai/credentials')
       .then((res) => (res.ok ? res.json() : []))
       .then((data: CredentialApiItem[]) => {
@@ -151,11 +158,16 @@ export const RecentActivitiesPage: React.FC = () => {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [user]);
 
   // Fetch Summary with filter synchronization
   const fetchSummary = useCallback(
     async (signal?: AbortSignal, currentReqId?: number) => {
+      if (!user) {
+        setSummary(null);
+        setSummaryError(null);
+        return;
+      }
       setSummaryError(null);
       try {
         const params = new URLSearchParams();
@@ -179,12 +191,19 @@ export const RecentActivitiesPage: React.FC = () => {
         setSummaryError('Failed to load activity summary metrics');
       }
     },
-    [selectedTask, selectedProvider]
+    [user, selectedTask, selectedProvider]
   );
 
   // Fetch Paginated History
   const fetchHistory = useCallback(
     async (cursor: string | null = null, isRefresh = false, signal?: AbortSignal, currentReqId?: number) => {
+      if (!user) {
+        setExecutions([]);
+        setTableError(null);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
       if (isRefresh) {
         setRefreshing(true);
       } else {
@@ -222,7 +241,7 @@ export const RecentActivitiesPage: React.FC = () => {
         }
       }
     },
-    [selectedTask, selectedProvider]
+    [user, selectedTask, selectedProvider]
   );
 
   // Synchronous filter change and initial load handling
@@ -501,25 +520,45 @@ export const RecentActivitiesPage: React.FC = () => {
             Real-time audit log of all model invocations, routing decisions, fallback traces, and multi-credential hops.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              const nextReqId = ++activeRequestIdRef.current;
-              fetchSummary(undefined, nextReqId);
-              const currentCursor = cursorStack[pageIndex - 1] ?? null;
-              fetchHistory(currentCursor, true, undefined, nextReqId);
-            }}
-            disabled={refreshing}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-surface-subtle border border-border text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        </div>
+        {user && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const nextReqId = ++activeRequestIdRef.current;
+                fetchSummary(undefined, nextReqId);
+                const currentCursor = cursorStack[pageIndex - 1] ?? null;
+                fetchHistory(currentCursor, true, undefined, nextReqId);
+              }}
+              disabled={refreshing}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-surface-subtle border border-border text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Summary Error Notice */}
+      {!user ? (
+        <AuthRequiredEmptyState
+          icon={Activity}
+          badge="AI Auditing & Observability"
+          title="Sign In to View Recent AI Activities"
+          description="Track and inspect every AI model invocation in real time. JobFinder provides transparent audit logs with provider routing decisions, token usage, latency metrics, and fallback trace trees."
+          benefits={[
+            "Real-time invocation logs for Gemini, OpenAI, Claude, Groq, and OpenRouter",
+            "Full hop trace inspection revealing automatic rate-limit cooldown recovery",
+            "Token consumption, latency breakdown, and cost policy enforcement records",
+            "Correlated batch operation tracking with immutable telemetry records"
+          ]}
+          primaryActionText="Sign In / Create Account"
+          authModalTitle="Sign in to View AI Activities"
+          authModalSubtitle="View your model invocation traces, routing logs, and audit records."
+        />
+      ) : (
+        <>
+          {/* Summary Error Notice */}
       {summaryError && (
         <div className="bg-amber-950/20 border border-amber-500/30 p-2.5 rounded-xl flex items-center justify-between text-xs text-amber-300">
           <div className="flex items-center gap-2">
@@ -827,6 +866,8 @@ export const RecentActivitiesPage: React.FC = () => {
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {/* Hop Trace & Execution Details Modal */}
       {selectedItemForTrace && (

@@ -1,7 +1,8 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DashboardPage } from './DashboardPage';
-import { AuthProvider } from '../context/AuthContext';
+import { AuthProvider, mockTestUser } from '../context/AuthContext';
+import { SyncProvider } from '../context/SyncContext';
 
 // Mock api
 vi.mock('../lib/api', () => ({
@@ -187,13 +188,15 @@ describe('JobFinder Dashboard - Live Command Center', () => {
     });
   });
 
-  const renderDashboard = () =>
+  const renderDashboard = (user: any = mockTestUser) =>
     render(
-      <AuthProvider>
-        <DashboardPage
-          onNavigateToOpportunities={onNavigateToOpportunities}
-          onNavigateToTab={onNavigateToTab}
-        />
+      <AuthProvider initialUser={user}>
+        <SyncProvider>
+          <DashboardPage
+            onNavigateToOpportunities={onNavigateToOpportunities}
+            onNavigateToTab={onNavigateToTab}
+          />
+        </SyncProvider>
       </AuthProvider>
     );
 
@@ -201,8 +204,8 @@ describe('JobFinder Dashboard - Live Command Center', () => {
     renderDashboard();
 
     expect(await screen.findByText(/Mohammed/)).toBeInTheDocument();
-    expect(screen.getByText('Full Stack AI Engineer & Automation Specialist')).toBeInTheDocument();
-    expect(screen.getByText('Firestore Synced • AI Hub Active')).toBeInTheDocument();
+    expect(await screen.findByText('Full Stack AI Engineer & Automation Specialist')).toBeInTheDocument();
+    expect(screen.getByTestId('sync-status-badge')).toBeInTheDocument();
   });
 
   it('calculates and displays live Career Pulse metrics without fake numbers', async () => {
@@ -295,5 +298,33 @@ describe('JobFinder Dashboard - Live Command Center', () => {
     expect(screen.getByText('No recommended opportunities match your current filters.')).toBeInTheDocument();
     expect(screen.getByText('No recent application activity logged yet.')).toBeInTheDocument();
     expect(screen.getByText('0 Tailored Resumes')).toBeInTheDocument();
+  });
+
+  it('suppresses protected network requests when signed out in guest mode', async () => {
+    (fetchWithAuth as any).mockImplementation((url: string) => {
+      if (url === '/api/v1/recommendations') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockRecommendations) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    renderDashboard(null);
+
+    // Verify public recommendations are requested
+    await waitFor(() => {
+      expect(fetchWithAuth).toHaveBeenCalledWith('/api/v1/recommendations');
+    });
+
+    // Verify protected endpoints are NOT called
+    expect(fetchWithAuth).not.toHaveBeenCalledWith('/api/v1/profile');
+    expect(fetchWithAuth).not.toHaveBeenCalledWith('/api/v1/applications');
+    expect(fetchWithAuth).not.toHaveBeenCalledWith('/api/v1/resumes');
+    expect(fetchWithAuth).not.toHaveBeenCalledWith('/api/v1/scanner/reports');
+    expect(fetchWithAuth).not.toHaveBeenCalledWith('/api/v1/ai/credentials');
+    expect(fetchWithAuth).not.toHaveBeenCalledWith('/api/v1/ai/health');
+
+    // Verify guest mode header displays
+    expect(screen.getByText('Guest Mode · Local Only')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sign In \/ Create Account/i })).toBeInTheDocument();
   });
 });

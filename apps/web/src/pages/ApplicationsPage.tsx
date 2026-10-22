@@ -11,6 +11,7 @@ import {
   Clock,
   ChevronDown,
   Check,
+  ArrowRight,
 } from 'lucide-react';
 import { ApplicationRecord, ApplicationStage, EventSource, ActivityDateRange } from '../types/application';
 import { isApplicationInDateRange } from '../components/applications/dateFilterUtils';
@@ -25,8 +26,15 @@ import { PlaywrightAutofillModal } from '../components/applications/PlaywrightAu
 import { AtsQuestionCopilotModal } from '../components/applications/AtsQuestionCopilotModal';
 import { ResumeStudioModal } from '../components/resume/ResumeStudioModal';
 import { fetchWithAuth } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
+import { AuthRequiredEmptyState } from '../components/common/AuthRequiredEmptyState';
+import { AuthModal } from '../components/auth/AuthModal';
 
-export const ApplicationsPage: React.FC = () => {
+export interface ApplicationsPageProps {
+  onNavigateToOpportunities?: () => void;
+}
+
+export const ApplicationsPage: React.FC<ApplicationsPageProps> = ({ onNavigateToOpportunities }) => {
   const [applications, setApplications] = useState<ApplicationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -43,14 +51,30 @@ export const ApplicationsPage: React.FC = () => {
   const [outcomeDecisionApp, setOutcomeDecisionApp] = useState<ApplicationRecord | null>(null);
   const [resumeStudioApp, setResumeStudioApp] = useState<ApplicationRecord | null>(null);
   const [toast, setToast] = useState<{ text: string; type: 'info' | 'success' | 'error' } | null>(null);
+  const { user } = useAuth();
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   const showToast = (text: string, type: 'info' | 'success' | 'error' = 'info') => {
     setToast({ text, type });
     setTimeout(() => setToast(null), 3500);
   };
 
+  const handleNavigateToOpportunities = () => {
+    if (onNavigateToOpportunities) {
+      onNavigateToOpportunities();
+    } else {
+      window.location.hash = 'opportunities';
+    }
+  };
+
   // Fetch applications from backend
   const fetchApplications = useCallback(async (quiet = false) => {
+    if (!user) {
+      setApplications([]);
+      setError(null);
+      if (!quiet) setLoading(false);
+      return;
+    }
     if (!quiet) setLoading(true);
     setError(null);
     try {
@@ -66,10 +90,15 @@ export const ApplicationsPage: React.FC = () => {
     } finally {
       if (!quiet) setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   // Initial sync from saved opportunities & fetch
   useEffect(() => {
+    if (!user) {
+      setApplications([]);
+      setLoading(false);
+      return;
+    }
     const init = async () => {
       setLoading(true);
       try {
@@ -83,10 +112,12 @@ export const ApplicationsPage: React.FC = () => {
       }
     };
     init();
-  }, [fetchApplications]);
+  }, [user, fetchApplications]);
 
   // Window focus & visibility auto-refresh (seamless integration with Web Clipper)
   useEffect(() => {
+    if (!user) return;
+
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'visible') {
         fetchApplications(true);
@@ -98,7 +129,7 @@ export const ApplicationsPage: React.FC = () => {
       window.removeEventListener('focus', handleVisibilityOrFocus);
       document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
-  }, [fetchApplications]);
+  }, [user, fetchApplications]);
 
   // Deep-link selection from Web Clipper (?selected=app_...)
   useEffect(() => {
@@ -111,6 +142,10 @@ export const ApplicationsPage: React.FC = () => {
 
   // Manual Trigger Sync
   const handleSyncFromSaved = async () => {
+    if (!user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
     setSyncing(true);
     try {
       const res = await fetchWithAuth('/api/v1/applications/sync-from-saved', { method: 'POST' });
@@ -340,7 +375,13 @@ export const ApplicationsPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={() => {
+              if (!user) {
+                setIsAuthModalOpen(true);
+                return;
+              }
+              setIsAddModalOpen(true);
+            }}
             className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-black bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 rounded-xl shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -479,6 +520,27 @@ export const ApplicationsPage: React.FC = () => {
           <div className="w-8 h-8 border-2 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin" />
           <span className="text-xs font-medium">Loading application pipeline...</span>
         </div>
+      ) : !user ? (
+        <AuthRequiredEmptyState
+          icon={Layers}
+          badge="Application Pipeline Tracker"
+          title="Sign In to Track Your Job Applications"
+          description="Keep all your job applications organized in one unified pipeline. Track interview stages, attach immutable ATS resume snapshots, and log offer outcomes."
+          benefits={[
+            "Live Kanban board with drag-and-drop status stages (Applied, Interviewing, Offer)",
+            "Automatic synchronization with Chrome extension job clipper",
+            "Immutable ATS resume snapshots linked to each submission",
+            "Outcome history and interview conversion rate analytics"
+          ]}
+          primaryActionText="Sign In / Create Account"
+          secondaryAction={{
+            label: "Explore Opportunities",
+            onClick: handleNavigateToOpportunities,
+            icon: <ArrowRight className="w-3.5 h-3.5" />
+          }}
+          authModalTitle="Sign in to Track Applications"
+          authModalSubtitle="Track submissions, interview stages, and offers across all platforms."
+        />
       ) : error ? (
         <div className="p-6 bg-red-500/10 border border-red-500/30 rounded-2xl text-center space-y-3">
           <AlertCircle className="w-8 h-8 text-red-400 mx-auto" />
@@ -630,6 +692,14 @@ export const ApplicationsPage: React.FC = () => {
           );
           setAutofillApp(null);
         }}
+      />
+
+      {/* Guest Sign-in Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        title="Sign in to Track Applications"
+        subtitle="Track submissions, interview stages, and offers across all platforms."
       />
     </div>
   );

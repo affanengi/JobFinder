@@ -154,6 +154,7 @@ class AtsEvidenceAuditReport(BaseModel):
     atsScore: int = Field(ge=0, le=100)
     truthIntegrityStatus: Literal["VERIFIED", "VIOLATIONS_DETECTED"]
     items: list[AtsEvidenceItem] = Field(default_factory=list)
+    evidenceAudit: list[AtsEvidenceItem] = Field(default_factory=list)
     keywordMatches: list[str] = Field(default_factory=list)
     evidenceMatches: list[str] = Field(default_factory=list)
     omittedOpportunities: list[str] = Field(default_factory=list)

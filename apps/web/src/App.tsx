@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider } from './context/AuthContext';
+import { SyncProvider } from './context/SyncContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopHeader } from './components/layout/TopHeader';
 import { DashboardPage } from './pages/DashboardPage';
@@ -7,7 +8,6 @@ import { OpportunitiesPage } from './pages/OpportunitiesPage';
 import { ApplicationsPage } from './pages/ApplicationsPage';
 import { ResumesPage } from './pages/ResumesPage';
 import { ScannerPage } from './pages/ScannerPage';
-import { MemoryPage } from './pages/MemoryPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { RecentActivitiesPage } from './pages/RecentActivitiesPage';
@@ -21,7 +21,6 @@ const VALID_TABS = [
   'resumes',
   'scanner',
   'applications',
-  'memory',
   'ai-activity',
   'settings',
 ] as const;
@@ -145,15 +144,13 @@ export const AppContent: React.FC = () => {
       case 'opportunities':
         return { title: 'Opportunities', subtitle: 'Ranked & scored match recommendations' };
       case 'profile':
-        return { title: 'Master Profile', subtitle: 'Verified career facts & truth knowledge base' };
+        return { title: 'Master Profile', subtitle: 'Sole canonical source of career facts, verified skills, and academic history' };
       case 'resumes':
         return { title: 'Tailored Resumes', subtitle: 'ATS-optimized resumes with zero hallucination' };
       case 'scanner':
         return { title: 'ATS Scanner', subtitle: '100-Point ATS parseability & technical keyword match engine' };
       case 'applications':
         return { title: 'Applications', subtitle: 'Track submitted & in-flight applications' };
-      case 'memory':
-        return { title: 'Memory Layer', subtitle: 'Learned preferences & interaction history' };
       case 'ai-activity':
         return { title: 'Recent AI Activities', subtitle: 'Audit log of model invocations, routing decisions, and fallback traces' };
       case 'settings':
@@ -193,9 +190,11 @@ export const AppContent: React.FC = () => {
           />
         );
       case 'applications':
-        return <ApplicationsPage />;
-      case 'memory':
-        return <MemoryPage />;
+        return (
+          <ApplicationsPage 
+            onNavigateToOpportunities={() => setActiveTab('opportunities')} 
+          />
+        );
       case 'ai-activity':
         return <RecentActivitiesPage />;
       case 'settings':
@@ -247,7 +246,9 @@ export const AppContent: React.FC = () => {
 export const App: React.FC = () => {
   return (
     <AuthProvider>
-      <AppContent />
+      <SyncProvider>
+        <AppContent />
+      </SyncProvider>
     </AuthProvider>
   );
 };
