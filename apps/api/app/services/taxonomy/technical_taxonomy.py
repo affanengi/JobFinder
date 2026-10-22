@@ -324,14 +324,59 @@ def match_keywords_against_job(resume_text_or_tokens: str, job_description: str)
     }
 
 
-def audit_bullet_text(bullet: str) -> Dict[str, Any]:
+# Trivial activity / domestic patterns that do not represent technical delivery
+TRIVIAL_TASK_PATTERNS: List[re.Pattern] = [
+    re.compile(r"\b(office supplies|pencils|chairs|drinks|lunch|snacks|coffee|meeting room bookings?|filing papers?)\b", re.IGNORECASE),
+]
+
+# Meaningful qualitative engineering milestones (awarded outcome credit without requiring numbers)
+QUALITATIVE_OUTCOME_PATTERNS: List[re.Pattern] = [
+    re.compile(r"\b(eliminat(ed|ing)|resolv(ed|ing)|prevent(ed|ing))\s+(a\s+)?(documented\s+)?(race condition|memory leak|bottleneck|downtime|security vulnerability|deadlock|degradation)\b", re.IGNORECASE),
+    re.compile(r"\b(achiev(ed|ing)|ensur(ed|ing)|guarante(ed|eing))\s+(zero[- ]downtime|high availability|fault tolerance|data consistency|acid compliance|sub[- ]second message delivery)\b", re.IGNORECASE),
+    re.compile(r"\b(standardiz(ed|ing)|streamlin(ed|ing)|refactor(ed|ing))\s+.*?\b(architecture|pipeline|lifecycle|workflow|schema)\b", re.IGNORECASE),
+    re.compile(r"\b(migrat(ed|ing))\s+.*?\bwith\s+zero\s+(data loss|downtime)\b", re.IGNORECASE),
+]
+
+# Trivial activity count patterns (e.g., attended 8 meetings weekly)
+TRIVIAL_ACTIVITY_PATTERNS: List[re.Pattern] = [
+    re.compile(r"\b(attended|participated in|joined|held)\s+\d+\s+(meetings|sessions|calls|conferences|events)\b", re.IGNORECASE),
+    re.compile(r"\b(ordered|bought|purchased|organized)\s+\d+\s+(office|supplies|chairs|pens|lunches|coffees)\b", re.IGNORECASE),
+]
+
+# High-impact measured outcomes (percentages, latency, throughput, cloud cost)
+MEASURED_IMPACT_PATTERNS: List[re.Pattern] = [
+    re.compile(r"\b(reduc(ed|ing)|cut(ting)?|decreas(ed|ing)|improv(ed|ing)|increas(ed|ing)|boost(ed|ing)|sav(ed|ing)|scal(ed|ing))\s+.*?\s+by\s+\d+(\.\d+)?%", re.IGNORECASE),
+    re.compile(r"\$\s*\d+([,\.]\d+)?\s*(k|m|b|million|billion|thousand)?\b", re.IGNORECASE),
+    re.compile(r"\b\d+(\.\d+)?\s*(k|m|b|million|billion)\+?\s*(users|requests|qps|rps|queries|records|events)\b", re.IGNORECASE),
+    re.compile(r"\bfrom\s+\d+.*?\s+to\s+\d+", re.IGNORECASE),
+    re.compile(r"\b\d+(\.\d+)?\s*%\s*(reduction|increase|improvement|boost|growth|drop)\b", re.IGNORECASE),
+]
+
+# Technical architecture & mechanism patterns
+ENGINEERING_MECHANISM_PATTERNS: List[re.Pattern] = [
+    re.compile(r"\b(microservices?|distributed|concurrency|pipeline|latency|throughput|caching|indexing|normalized|query optimization|ci/cd|autoscaling|multithreading|asynchronous|event[- ]driven|rest api|graphql|schema|migration|race condition|memory leak|sharding|replication|containeriz(ed|ation)|orchestrat(ed|ion))\b", re.IGNORECASE),
+]
+
+# Generic corporate buzzwords lacking technical mechanism
+VAGUE_BUZZWORD_PATTERNS: List[re.Pattern] = [
+    re.compile(r"\b(championed excellence|drove innovation|synergy|thought leader|best[- ]in[- ]class|world[- ]class|results[- ]driven|hard worker|go[- ]to person|team player|passionate developer)\b", re.IGNORECASE),
+]
+
+
+def audit_bullet_text(
+    bullet: str,
+    job_context: Optional[Any] = None,
+    target_role: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    Perform a multi-dimensional bullet audit assessing:
-    1. Strong action verb opener (strength & technical precision)
-    2. Weak/passive phrasing detection
-    3. Technical implementation depth & context
-    4. Quantified metric evidence (bonus, not sole determinant)
-    5. Optimal word length (12-32 words target)
+    Perform a 4-dimensional contextual bullet audit assessing:
+    1. Action & Scope (0 - 25 pts)
+    2. Technical Substance & Mechanism (0 - 25 pts)
+    3. Outcome Credibility & Value Delivered (0 - 25 pts, qualitative or quantitative)
+    4. Target Role Relevance (0 - 25 pts)
+
+    Eliminates arbitrary point bonuses (+25 verb, +15 metric, +20 length) and replaces them
+    with an evidence-grounded rubric.
     """
     clean_bullet = bullet.strip().lstrip("-•* ").strip()
     if not clean_bullet:
@@ -344,7 +389,14 @@ def audit_bullet_text(bullet: str) -> Dict[str, Any]:
             "word_count": 0,
             "issues": ["Empty bullet point"],
             "score": 0,
-            "status": "weak"
+            "status": "weak",
+            "rubric_breakdown": {
+                "action_scope_score": 0.0,
+                "technical_substance_score": 0.0,
+                "outcome_credibility_score": 0.0,
+                "job_relevance_score": 0.0,
+                "rubric_notes": ["Empty statement"]
+            }
         }
 
     words = clean_bullet.split()
@@ -371,51 +423,162 @@ def audit_bullet_text(bullet: str) -> Dict[str, Any]:
             weak_suggestion = weak_rule["suggestion"]
             break
 
-    # 3. Quantified Metric Check
+    # 3. Quantified Metric Detection (boolean flag preserved for legacy contracts)
     has_metric = False
     for pat in METRIC_PATTERNS:
         if pat.search(clean_bullet):
             has_metric = True
             break
 
-    # 4. Multi-dimensional Bullet Scoring (Base 40 pts)
-    score = 40
     issues: List[str] = []
 
+    # -------------------------------------------------------------------------
+    # DIMENSION 1: Action & Scope (0 - 25 pts)
+    # -------------------------------------------------------------------------
+    is_trivial_task = any(pat.search(clean_bullet) for pat in TRIVIAL_TASK_PATTERNS)
+    extracted_entities = extract_technical_entities(clean_bullet)
+    has_mechanism = any(pat.search(clean_bullet) for pat in ENGINEERING_MECHANISM_PATTERNS)
+    has_buzzword = any(pat.search(clean_bullet) for pat in VAGUE_BUZZWORD_PATTERNS)
+
+    hard_technical_entities = [e for e in extracted_entities if not str(e.get("category", "")).startswith("soft_skills")]
+
     if has_weak_opener:
-        score -= 25
+        action_scope = 5.0
         issues.append(f"Weak/Passive phrasing: {weak_suggestion}")
+    elif is_trivial_task:
+        action_scope = 8.0
+        issues.append("Action verb applied to administrative or trivial task")
+    elif has_buzzword and not has_mechanism:
+        action_scope = 10.0
+        issues.append("Action verb coupled with generic corporate buzzwords lacking implementation scope")
     elif has_action_verb:
-        score += 25
+        if word_count < 8:
+            action_scope = 16.0
+            issues.append(f"Action context is very concise ({word_count} words); expand with implementation scope")
+        elif word_count > 34:
+            action_scope = 19.0
+            issues.append(f"Action context is lengthy ({word_count} words); tighten to maintain focus")
+        else:
+            action_scope = 23.0
     else:
-        score -= 15
+        action_scope = 10.0
         issues.append(f"Missing strong action verb opener (starts with '{words[0]}')")
 
-    # Technical depth / implementation clarity heuristic
-    if word_count < 10:
-        score -= 15
-        issues.append(f"Too concise ({word_count} words); expand with technical context and implementation details")
-    elif word_count >= 12:
-        score += 20
+    # -------------------------------------------------------------------------
+    # DIMENSION 2: Technical Substance & Mechanism (0 - 25 pts)
+    # -------------------------------------------------------------------------
+    # Detect keyword dumping (high entity count with very few descriptive words)
+    if len(extracted_entities) >= 4 and (len(extracted_entities) / max(word_count, 1)) > 0.40:
+        technical_substance = 8.0
+        issues.append("Uncontextualized keyword dump detected; incorporate technologies into descriptive implementation statements")
+    elif has_buzzword and not has_mechanism:
+        technical_substance = 8.0
+        issues.append("Vague phrasing lacking technical implementation mechanism or architectural detail")
+    elif len(hard_technical_entities) >= 1 and has_mechanism:
+        technical_substance = min(21.0 + len(hard_technical_entities), 25.0)
+    elif has_mechanism:
+        technical_substance = 20.0
+    elif has_weak_opener and not has_mechanism:
+        technical_substance = 10.0
+    elif len(hard_technical_entities) >= 1:
+        technical_substance = 16.0
+    elif has_buzzword:
+        technical_substance = 8.0
+        issues.append("Vague phrasing lacking technical implementation mechanism or architectural detail")
     else:
-        score += 10
+        technical_substance = 11.0
+        if word_count >= 8:
+            issues.append("Lacks technical implementation mechanism (architecture, protocol, algorithm, or tools)")
 
-    if word_count > 34:
-        score -= 10
-        issues.append(f"Too lengthy ({word_count} words); tighten to maintain reader focus")
+    # -------------------------------------------------------------------------
+    # DIMENSION 3: Outcome Credibility & Value Delivered (0 - 25 pts)
+    # -------------------------------------------------------------------------
+    is_trivial_activity = any(pat.search(clean_bullet) for pat in TRIVIAL_ACTIVITY_PATTERNS)
+    has_measured_impact = any(pat.search(clean_bullet) for pat in MEASURED_IMPACT_PATTERNS)
+    has_qualitative_outcome = any(pat.search(clean_bullet) for pat in QUALITATIVE_OUTCOME_PATTERNS)
 
-    if has_metric:
-        score += 15
+    if is_trivial_activity:
+        outcome_credibility = 7.0
+        issues.append("Activity count detected without delivered impact or qualitative milestone")
+    elif has_measured_impact:
+        outcome_credibility = 24.0
+    elif has_qualitative_outcome:
+        # High outcome credit awarded for genuine qualitative engineering milestones!
+        outcome_credibility = 22.0
+    elif has_metric:
+        # Generic metric (e.g., team of 4)
+        outcome_credibility = 14.0
+    else:
+        outcome_credibility = 10.0
+        issues.append("Lacks explicit outcome or qualitative milestone (e.g., latency, reliability, or business impact)")
 
-    score = min(max(score, 0), 100)
+    # -------------------------------------------------------------------------
+    # DIMENSION 4: Target Role Relevance (0 - 25 pts)
+    # -------------------------------------------------------------------------
+    if job_context or target_role:
+        jd_text = ""
+        if isinstance(job_context, dict):
+            jd_text = (
+                str(job_context.get("description", ""))
+                + " " + " ".join(job_context.get("requirements", []))
+                + " " + str(job_context.get("title", ""))
+            )
+        elif isinstance(job_context, str):
+            jd_text = job_context
+        role_text = (target_role or "").lower()
 
-    # Status classification
-    if score >= 80:
+        jd_entities = {e["id"] for e in extract_technical_entities(jd_text)} if jd_text else set()
+        bullet_entities = {e["id"] for e in extracted_entities}
+
+        # Domain mismatch detection
+        mobile_techs = {"swift", "kotlin", "ios", "android", "flutter", "react native", "swiftui"}
+        backend_techs = {"python", "fastapi", "django", "go", "golang", "java", "postgresql", "redis", "docker", "kubernetes", "aws"}
+
+        is_mobile_bullet = bool(bullet_entities.intersection(mobile_techs)) or "ios" in clean_bullet.lower() or "swift" in clean_bullet.lower()
+        is_backend_target = bool(jd_entities.intersection(backend_techs)) or "backend" in role_text or "distributed" in role_text
+
+        if is_mobile_bullet and is_backend_target and not bool(bullet_entities.intersection(jd_entities)):
+            job_relevance = 6.0
+            issues.append("Experience domain (mobile) does not align with target role requirements (backend)")
+        elif bullet_entities and jd_entities and bool(bullet_entities.intersection(jd_entities)):
+            job_relevance = 24.0
+        elif jd_entities and not bool(bullet_entities.intersection(jd_entities)):
+            job_relevance = 12.0
+            issues.append("Statement does not mention required skills from target job description")
+        else:
+            job_relevance = 14.0 if has_weak_opener else 18.0
+    else:
+        # Calibrated baseline scan without specific target job
+        if has_weak_opener or has_buzzword or is_trivial_task:
+            job_relevance = 10.0
+        else:
+            job_relevance = 18.0
+
+    # -------------------------------------------------------------------------
+    # COMPOSITE SCORE & STATUS CLASSIFICATION
+    # -------------------------------------------------------------------------
+    score = round(action_scope + technical_substance + outcome_credibility + job_relevance)
+    score = max(0, min(100, score))
+
+    if score >= 75:
         status = "strong"
-    elif score >= 55:
+    elif score >= 50:
         status = "moderate"
     else:
         status = "weak"
+
+    rubric_breakdown = {
+        "action_scope_score": action_scope,
+        "technical_substance_score": technical_substance,
+        "outcome_credibility_score": outcome_credibility,
+        "job_relevance_score": job_relevance,
+        "rubric_notes": [
+            f"Action & Scope: {action_scope}/25",
+            f"Technical Substance: {technical_substance}/25",
+            f"Outcome Credibility: {outcome_credibility}/25",
+            f"Target Role Relevance: {job_relevance}/25"
+        ]
+    }
 
     return {
         "text": clean_bullet,
@@ -426,5 +589,6 @@ def audit_bullet_text(bullet: str) -> Dict[str, Any]:
         "word_count": word_count,
         "issues": issues,
         "score": score,
-        "status": status
+        "status": status,
+        "rubric_breakdown": rubric_breakdown
     }

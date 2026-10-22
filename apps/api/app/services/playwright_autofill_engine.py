@@ -889,11 +889,16 @@ class PlaywrightAutofillEngine:
             )
 
             is_headless = False if self.headless_override is None else self.headless_override
+            browser_args = (
+                ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                if is_headless
+                else ["--start-maximized"]
+            )
 
             playwright_mgr = await async_playwright().start()
             browser = await playwright_mgr.chromium.launch(
                 headless=is_headless,
-                args=["--start-maximized"] if not is_headless else [],
+                args=browser_args,
             )
             context = await browser.new_context(viewport=None if not is_headless else {"width": 1280, "height": 800})
             page = await context.new_page()
@@ -1228,21 +1233,41 @@ class PlaywrightAutofillEngine:
 
         except asyncio.CancelledError:
             logger.info(f"Autofill session {session_id} cancelled.")
-            if context:
+            ctx_data = self._browser_contexts.pop(session_id, None)
+            if ctx_data:
+                context_to_close = ctx_data.get("context")
+                browser_to_close = ctx_data.get("browser")
+                mgr_to_stop = ctx_data.get("playwright")
+                if context_to_close:
+                    try:
+                        await context_to_close.close()
+                    except Exception:
+                        pass
+                if browser_to_close:
+                    try:
+                        await browser_to_close.close()
+                    except Exception:
+                        pass
+                if mgr_to_stop:
+                    try:
+                        await mgr_to_stop.stop()
+                    except Exception:
+                        pass
+            elif context:
                 try:
                     await context.close()
                 except Exception:
                     pass
-            if browser:
-                try:
-                    await browser.close()
-                except Exception:
-                    pass
-            if playwright_mgr:
-                try:
-                    await playwright_mgr.stop()
-                except Exception:
-                    pass
+                if browser:
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
+                if playwright_mgr:
+                    try:
+                        await playwright_mgr.stop()
+                    except Exception:
+                        pass
         except Exception as e:
             logger.error(f"Error in autofill lifecycle for session {session_id}: {e}", exc_info=True)
             await self.broadcast_event(

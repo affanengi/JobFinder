@@ -26,8 +26,10 @@ from app.schemas.scanner import (
     KeywordMatrix,
     KeywordMatchDetail,
     BulletAuditItem,
+    BulletRubricBreakdown,
     ChecklistItem,
     ScanMetadata,
+    ReadinessAssessment,
     AiBulletRewriteResponse,
     BulletSuggestion,
     BulkBulletInput,
@@ -417,11 +419,25 @@ class AtsScannerEngine:
         metric_count = 0
         weak_opener_count = 0
 
+        target_role = resume_data.get("targetRole") or (job_data.get("title") if isinstance(job_data, dict) else None)
+        active_job_context = job_data if job_data else ({"description": jd_text} if jd_text else None)
+
         for b in raw_bullets:
-            audit = audit_bullet_text(b["text"])
+            audit = audit_bullet_text(b["text"], job_context=active_job_context, target_role=target_role)
             if audit["has_action_verb"]: action_verb_count += 1
             if audit["has_metric"]: metric_count += 1
             if audit["has_weak_opener"]: weak_opener_count += 1
+
+            rubric_data = None
+            if audit.get("rubric_breakdown"):
+                rb = audit["rubric_breakdown"]
+                rubric_data = BulletRubricBreakdown(
+                    action_scope_score=rb.get("action_scope_score", 0.0),
+                    technical_substance_score=rb.get("technical_substance_score", 0.0),
+                    outcome_credibility_score=rb.get("outcome_credibility_score", 0.0),
+                    job_relevance_score=rb.get("job_relevance_score", 0.0),
+                    rubric_notes=rb.get("rubric_notes", [])
+                )
 
             bullet_audits.append(BulletAuditItem(
                 id=b["id"],
@@ -435,7 +451,8 @@ class AtsScannerEngine:
                 has_weak_opener=audit["has_weak_opener"],
                 verb=audit["verb"],
                 word_count=audit["word_count"],
-                issues=audit["issues"]
+                issues=audit["issues"],
+                rubric_breakdown=rubric_data
             ))
 
         total_bullets = max(len(raw_bullets), 1)
@@ -583,10 +600,65 @@ class AtsScannerEngine:
         p4_status: Literal["pass", "warning", "fail"] = "pass" if p4_total >= 16 else ("warning" if p4_total >= 12 else "fail")
 
         # -------------------------------------------------------------
-        # OVERALL SCORE, GRADE & ACTIONABLE CHECKLIST
+        # OVERALL SCORE, QUALITATIVE READINESS GATING & GRADE
         # -------------------------------------------------------------
         overall_score = round(p1_total + p2_total + p3_total + p4_total)
         overall_score = max(0, min(100, overall_score))
+
+        # Qualitative assessment tiers
+        if p1_total >= 22.0:
+            parseability_tier: Literal["optimal", "acceptable", "needs_reformatting"] = "optimal"
+        elif p1_total >= 17.0:
+            parseability_tier = "acceptable"
+        else:
+            parseability_tier = "needs_reformatting"
+
+        avg_bullet_substance = (
+            sum(b.score for b in bullet_audits) / max(len(bullet_audits), 1)
+        )
+        if avg_bullet_substance >= 75.0:
+            substance_tier: Literal["substantive", "moderate", "superficial"] = "substantive"
+        elif avg_bullet_substance >= 50.0:
+            substance_tier = "moderate"
+        else:
+            substance_tier = "superficial"
+
+        has_jd = bool(jd_text.strip())
+        if has_jd:
+            mand_cov_pct = kw_match_data.get("match_percentage", 0.0)
+            if mand_cov_pct >= 75.0:
+                core_align_tier: Literal["high", "moderate", "low", "unaligned"] = "high"
+            elif mand_cov_pct >= 50.0:
+                core_align_tier = "moderate"
+            elif mand_cov_pct > 0.0:
+                core_align_tier = "low"
+            else:
+                core_align_tier = "unaligned"
+        else:
+            mand_cov_pct = 0.0
+            core_align_tier = "unaligned"
+
+        # Non-compensatory qualitative gating:
+        # If a target job description is provided and mandatory coverage is below 40%,
+        # the candidate cannot receive an A or B grade regardless of formatting perfection.
+        if has_jd and mand_cov_pct < 40.0:
+            overall_score = min(overall_score, 59)
+            summary_verdict = "Needs Alignment — Critical role requirements missing from resume despite formatting or generic phrasing."
+        elif parseability_tier == "needs_reformatting":
+            overall_score = min(overall_score, 68)
+            summary_verdict = "Structural Revision Needed — Section headers or character flow issues risk automated parsing rejection."
+        elif core_align_tier in ["high", "moderate"] and substance_tier == "substantive" and parseability_tier == "optimal":
+            summary_verdict = "Ready to Apply — High role alignment with substantive, grounded evidence and clean ATS formatting."
+        else:
+            summary_verdict = "Good Foundation — Solid structure with opportunities to deepen technical evidence or align missing skills."
+
+        readiness = ReadinessAssessment(
+            core_alignment_tier=core_align_tier,
+            substance_tier=substance_tier,
+            parseability_tier=parseability_tier,
+            mandatory_coverage_pct=mand_cov_pct,
+            summary_verdict=summary_verdict
+        )
 
         grade: Literal["A+", "A", "B", "C", "D"]
         if overall_score >= 90:
@@ -709,6 +781,8 @@ class AtsScannerEngine:
         read_time_secs = max(int(word_count / 3.5), 15)
         read_time_str = f"{read_time_secs} sec" if read_time_secs < 60 else f"{round(read_time_secs/60, 1)} min"
 
+        confidence_level: Literal["high", "moderate", "low"] = "low" if word_count < 150 else "high"
+
         return AtsScanResult(
             overall_score=overall_score,
             grade=grade,
@@ -726,7 +800,10 @@ class AtsScannerEngine:
                 word_count=word_count,
                 estimated_read_time=read_time_str,
                 taxonomy_version=TAXONOMY_VERSION
-            )
+            ),
+            readiness=readiness,
+            analysis_mode="deterministic_structural",
+            confidence_level=confidence_level
         )
 
     def scan_raw_resume_bytes(

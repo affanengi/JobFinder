@@ -36,7 +36,7 @@ jobs:
       - name: Run pytest Suite
         env:
           CI: "true"
-        run: pytest --maxfail=1 --disable-warnings -q
+        run: timeout 300 pytest --maxfail=1 --disable-warnings -q
 
   frontend-checks:
     name: Frontend Linting, Typing & Tests

@@ -163,7 +163,10 @@ async def test_frame_discovery_databricks_split_layout():
     split_url = f"file://{os.path.abspath(os.path.join(FIXTURES_DIR, 'mock_split_iframe.html'))}"
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        )
         page = await browser.new_page()
         await page.goto(split_url, wait_until="domcontentloaded")
         await page.wait_for_timeout(500)

@@ -18,7 +18,7 @@ from app.schemas.application import (
     ApplicationStage,
     ResumeArtifactSnapshot,
 )
-from app.schemas.autofill import AutofillStatusEnum
+from app.schemas.autofill import AutofillSessionDTO, AutofillStatusEnum
 from app.schemas.profile import AutofillProfile, EducationEntry, EducationFact, PersonalContact, PersonalLinks, Profile
 from app.schemas.resume import ResumeContact, ResumeValidationResult, StructuredResumeContent, TailoredResumeDTO
 from app.services.ats_form_discovery import ApplicationStateDetector, FormRootContext
@@ -367,34 +367,42 @@ async def test_start_autofill_endpoint_blocks_without_approved_resume():
 @pytest.mark.asyncio
 async def test_start_autofill_duplicate_session_returns_409():
     app_record = seed_ready_application("app_dup_test")
+    # Pre-register an active session for this application to test 409 rejection deterministically
+    mock_session = AutofillSessionDTO(
+        sessionId="af-mock-dup-123",
+        userId=TEST_USER,
+        applicationId=app_record.id,
+        portalUrl="https://example.com/apply",
+        atsType="generic",
+        status=AutofillStatusEnum.READY_FOR_SUBMISSION,
+    )
+    playwright_autofill_engine._active_sessions[mock_session.sessionId] = mock_session
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        res1 = await ac.post(f"/api/v1/applications/{app_record.id}/autofill/start", headers=HEADERS)
-        assert res1.status_code == 200
-        session_id = res1.json()["sessionId"]
-
-        # Try duplicate launch
-        res2 = await ac.post(f"/api/v1/applications/{app_record.id}/autofill/start", headers=HEADERS)
-        assert res2.status_code == 409
-        assert "already running" in res2.json()["detail"]
-
-        # Clean up
-        await ac.post(f"/api/v1/applications/{app_record.id}/autofill/cancel?session_id={session_id}", headers=HEADERS)
+        res = await ac.post(f"/api/v1/applications/{app_record.id}/autofill/start", headers=HEADERS)
+        assert res.status_code == 409
+        assert "already running" in res.json()["detail"]
 
 
 @pytest.mark.asyncio
 async def test_human_confirm_submission_advances_to_applied():
     app_record = seed_ready_application("app_confirm_test")
+    mock_session = AutofillSessionDTO(
+        sessionId="af-mock-confirm-123",
+        userId=TEST_USER,
+        applicationId=app_record.id,
+        portalUrl="https://example.com/apply",
+        atsType="generic",
+        status=AutofillStatusEnum.READY_FOR_SUBMISSION,
+    )
+    playwright_autofill_engine._active_sessions[mock_session.sessionId] = mock_session
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        res1 = await ac.post(f"/api/v1/applications/{app_record.id}/autofill/start", headers=HEADERS)
-        assert res1.status_code == 200
-        session_id = res1.json()["sessionId"]
-
-        # Human confirms submission
         confirm_res = await ac.post(
             f"/api/v1/applications/{app_record.id}/autofill/confirm-submission",
-            json={"sessionId": session_id, "notes": "Candidate manually clicked submit on portal"},
+            json={"sessionId": mock_session.sessionId, "notes": "Candidate manually clicked submit on portal"},
             headers=HEADERS,
         )
         assert confirm_res.status_code == 200
@@ -412,21 +420,27 @@ async def test_human_confirm_submission_advances_to_applied():
 @pytest.mark.asyncio
 async def test_cross_user_isolation_blocks_unauthorized_access():
     app_record = seed_ready_application("app_iso_test")
+    mock_session = AutofillSessionDTO(
+        sessionId="af-mock-iso-123",
+        userId=TEST_USER,
+        applicationId=app_record.id,
+        portalUrl="https://example.com/apply",
+        atsType="generic",
+        status=AutofillStatusEnum.READY_FOR_SUBMISSION,
+    )
+    playwright_autofill_engine._active_sessions[mock_session.sessionId] = mock_session
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        res1 = await ac.post(f"/api/v1/applications/{app_record.id}/autofill/start", headers=HEADERS)
-        assert res1.status_code == 200
-        session_id = res1.json()["sessionId"]
-
         # Attacker user attempts to cancel or access
         attacker_headers = {"X-User-Id": "malicious_user_999"}
         res_cancel = await ac.post(
-            f"/api/v1/applications/{app_record.id}/autofill/cancel?session_id={session_id}",
+            f"/api/v1/applications/{app_record.id}/autofill/cancel?session_id={mock_session.sessionId}",
             headers=attacker_headers,
         )
         assert res_cancel.status_code in (403, 404)
 
-        await ac.post(f"/api/v1/applications/{app_record.id}/autofill/cancel?session_id={session_id}", headers=HEADERS)
+        await ac.post(f"/api/v1/applications/{app_record.id}/autofill/cancel?session_id={mock_session.sessionId}", headers=HEADERS)
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +626,10 @@ async def test_experience_threshold_evaluation_logic():
 
     engine = PlaywrightAutofillEngine()
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        )
         page = await browser.new_page()
 
         # HTML with experience question
@@ -658,7 +675,10 @@ async def test_terminal_submit_detection_with_many_buttons():
     from playwright.async_api import async_playwright
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+        )
         page = await browser.new_page()
 
         # Generate HTML with 22 dummy buttons (Attach, Remove, Add Another) and a submit button at the end

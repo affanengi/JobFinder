@@ -227,3 +227,177 @@ def test_api_scan_file_upload(client):
     assert "category_scores" in data
     assert "keyword_matrix" in data
     assert data["metadata"]["source_type"] == "file_upload"
+
+
+# =========================================================================
+# PHASE 1 CALIBRATION SUITE — 14 MANDATORY ORDINAL INVARIANT SCENARIOS
+# =========================================================================
+
+def test_calibration_scenario_1_qualitative_engineering_without_numbers():
+    """Scenario 1: Strong qualitative engineering work without numbers."""
+    bullet = "Improved authentication reliability by eliminating a documented race condition in concurrent session handling."
+    audit = audit_bullet_text(bullet)
+
+    assert audit["rubric_breakdown"] is not None
+    assert audit["status"] == "strong"
+    assert audit["score"] >= 75
+    # Outcome credibility should be high for genuine qualitative engineering milestone without numbers
+    assert audit["rubric_breakdown"]["outcome_credibility_score"] >= 20.0
+
+
+def test_calibration_scenario_2_meaningful_quantified_impact():
+    """Scenario 2: Meaningful quantified impact with architectural mechanism."""
+    bullet = "Architected distributed FastAPI microservice reducing p99 latency by 45% across 100k+ daily users."
+    audit = audit_bullet_text(bullet)
+
+    assert audit["status"] == "strong"
+    assert audit["score"] >= 85
+    assert audit["rubric_breakdown"]["outcome_credibility_score"] >= 23.0
+
+
+def test_calibration_scenario_3_numbers_describing_mere_activity():
+    """Scenario 3: Numbers describing mere activity/scale should rank lower than substantive work."""
+    qualitative_bullet = "Improved authentication reliability by eliminating a documented race condition in concurrent session handling."
+    activity_bullet = "Attended 8 meetings weekly and held 5 team status review sessions."
+
+    qual_audit = audit_bullet_text(qualitative_bullet)
+    act_audit = audit_bullet_text(activity_bullet)
+
+    # Ordinal Invariant: Substantive qualitative work > trivial activity numbers
+    assert qual_audit["score"] > act_audit["score"]
+    assert act_audit["status"] == "weak"
+    assert act_audit["rubric_breakdown"]["outcome_credibility_score"] < 10.0
+
+
+def test_calibration_scenario_4_strong_verbs_describing_trivial_work():
+    """Scenario 4: Strong verbs applied to trivial work must not score highly."""
+    bullet = "Spearheaded ordering office supplies and organizing lunch for the team."
+    audit = audit_bullet_text(bullet)
+
+    assert audit["status"] == "weak"
+    assert audit["score"] < 50
+    assert audit["rubric_breakdown"]["action_scope_score"] <= 10.0
+
+
+def test_calibration_scenario_5_unrelated_technical_work():
+    """Scenario 5: Technical work unrelated to target role has low role relevance."""
+    bullet = "Engineered native iOS UI with Swift and SwiftUI for mobile banking application."
+    job_context = {"title": "Senior Go Backend Developer", "description": "Looking for Go, Kubernetes, PostgreSQL, microservices engineer."}
+
+    audit = audit_bullet_text(bullet, job_context=job_context, target_role="Senior Go Backend Developer")
+
+    assert audit["rubric_breakdown"]["job_relevance_score"] <= 10.0
+    assert any("domain (mobile) does not align" in issue for issue in audit["issues"])
+
+
+def test_calibration_scenario_6_vague_claims_with_polished_buzzwords():
+    """Scenario 6: Vague claims with polished buzzwords flagged for missing mechanism."""
+    bullet = "Championed excellence and drove innovation across cross-functional teams."
+    audit = audit_bullet_text(bullet)
+
+    assert audit["status"] == "weak"
+    assert audit["score"] < 50
+    assert audit["rubric_breakdown"]["technical_substance_score"] <= 10.0
+
+
+def test_calibration_scenario_7_keyword_stuffing_detection():
+    """Scenario 7: Keyword stuffing (unconnected entity dumps) flagged syntactically."""
+    bullet = "Python, FastAPI, Docker, Kubernetes, AWS, PostgreSQL, Redis, Kafka, React."
+    audit = audit_bullet_text(bullet)
+
+    assert any("keyword dump" in issue.lower() for issue in audit["issues"])
+    assert audit["rubric_breakdown"]["technical_substance_score"] <= 10.0
+
+
+def test_calibration_scenario_8_similar_bullets_distinct_projects(sample_strong_resume, sample_job):
+    """Scenario 8: Similar skills across distinct roles/projects are credited without duplicate penalties."""
+    resume = dict(sample_strong_resume)
+    result = ats_scanner_engine.scan_tailored_resume(resume, sample_job)
+
+    assert result.overall_score >= 80
+    assert result.category_scores["parseability"].status == "pass"
+
+
+def test_calibration_scenario_9_duplicate_bullets_within_same_container():
+    """Scenario 9: Exact duplicate bullets within same container evaluated consistently."""
+    text1 = "Architected distributed microservices in FastAPI reducing latency by 45%."
+    text2 = "Architected distributed microservices in FastAPI reducing latency by 45%."
+
+    audit1 = audit_bullet_text(text1)
+    audit2 = audit_bullet_text(text2)
+
+    assert audit1["score"] == audit2["score"]
+
+
+def test_calibration_scenario_10_equivalent_skill_terminology():
+    """Scenario 10: Equivalent skill terminology canonicalized (Postgres, PostgreSQL, psql)."""
+    e1 = extract_technical_entities("Hands-on experience with Postgres.")
+    e2 = extract_technical_entities("Expertise in PostgreSQL databases.")
+    e3 = extract_technical_entities("Database maintenance using psql.")
+
+    assert e1[0]["id"] == "postgresql"
+    assert e2[0]["id"] == "postgresql"
+    assert e3[0]["id"] == "postgresql"
+
+
+def test_calibration_scenario_11_missing_target_job_description(sample_strong_resume):
+    """Scenario 11: Missing job description runs baseline structural mode cleanly."""
+    result = ats_scanner_engine.scan_tailored_resume(sample_strong_resume, job_data=None)
+
+    assert result.readiness is not None
+    assert result.readiness.core_alignment_tier == "unaligned"
+    assert result.analysis_mode == "deterministic_structural"
+    assert result.overall_score > 0
+
+
+def test_calibration_scenario_12_sparse_resume_low_confidence():
+    """Scenario 12: Sparse resume (<150 words) flagged with low confidence."""
+    sparse_resume = {
+        "id": "sparse_1",
+        "targetRole": "Developer",
+        "content": {
+            "summary": "Software developer looking for work.",
+            "skills": {"languages": ["Python"]},
+            "experience": [
+                {
+                    "title": "Coder",
+                    "company": "Acme",
+                    "bullets": ["Wrote python scripts."]
+                }
+            ]
+        }
+    }
+    result = ats_scanner_engine.scan_tailored_resume(sparse_resume, job_data=None)
+
+    assert result.confidence_level == "low"
+    assert result.metadata.word_count < 150
+
+
+def test_calibration_scenario_13_critical_mandatory_requirements_missing(sample_strong_resume):
+    """Scenario 13: Mismatched role with critical mandatory requirements missing is gated."""
+    mismatched_job = {
+        "id": "job_ios_lead",
+        "title": "Principal iOS Engineer",
+        "description": "Must have Swift, Objective-C, SwiftUI, CoreData, Xcode, TestFlight, and CocoaPods.",
+        "requirements": ["Swift", "Objective-C", "SwiftUI", "CoreData", "Xcode", "CocoaPods"],
+        "skills": ["Swift", "Objective-C", "SwiftUI", "CoreData", "Xcode", "CocoaPods"]
+    }
+    result = ats_scanner_engine.scan_tailored_resume(sample_strong_resume, mismatched_job)
+
+    # Non-compensatory gating: overall score capped at <= 59, grade C or D, Needs Alignment
+    assert result.overall_score <= 59
+    assert result.grade in ["C", "D"]
+    assert result.readiness is not None
+    assert "Needs Alignment" in result.readiness.summary_verdict
+
+
+def test_calibration_scenario_14_corroborated_evidence_across_multiple_roles(sample_strong_resume, sample_job):
+    """Scenario 14: Requirements supported by multiple statements across experience & projects."""
+    result = ats_scanner_engine.scan_tailored_resume(sample_strong_resume, sample_job)
+
+    # Both experience and projects demonstrate PostgreSQL across separate roles
+    postgres_bullets = [b for b in result.bullet_audits if "postgresql" in b.text.lower()]
+    assert len(postgres_bullets) >= 2
+    assert all(b.status in ["strong", "moderate"] for b in postgres_bullets)
+
+

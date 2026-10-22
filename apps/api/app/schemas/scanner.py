@@ -47,6 +47,14 @@ class KeywordMatrix(BaseModel):
     transferable_count: int = 0
 
 
+class BulletRubricBreakdown(BaseModel):
+    action_scope_score: float = Field(ge=0, le=25)
+    technical_substance_score: float = Field(ge=0, le=25)
+    outcome_credibility_score: float = Field(ge=0, le=25)
+    job_relevance_score: float = Field(ge=0, le=25)
+    rubric_notes: List[str] = Field(default_factory=list)
+
+
 class BulletAuditItem(BaseModel):
     id: str
     section: str
@@ -60,6 +68,12 @@ class BulletAuditItem(BaseModel):
     verb: Optional[str] = None
     word_count: int
     issues: List[str] = []
+
+    # Additive contextual fields (strictly optional, default=None)
+    rubric_breakdown: Optional[BulletRubricBreakdown] = None
+    matched_requirement_ids: List[str] = Field(default_factory=list)
+    evidence_classification: Optional[Literal["demonstrated", "listed", "transferable", "none"]] = None
+    suggested_focus: Optional[str] = None
 
 
 class ChecklistItem(BaseModel):
@@ -83,6 +97,14 @@ class ScanMetadata(BaseModel):
     taxonomy_version: str = "1.0.0"
 
 
+class ReadinessAssessment(BaseModel):
+    core_alignment_tier: Literal["high", "moderate", "low", "unaligned"]
+    substance_tier: Literal["substantive", "moderate", "superficial"]
+    parseability_tier: Literal["optimal", "acceptable", "needs_reformatting"]
+    mandatory_coverage_pct: float
+    summary_verdict: str
+
+
 class AtsScanResult(BaseModel):
     overall_score: int
     grade: Literal["A+", "A", "B", "C", "D"]
@@ -92,6 +114,11 @@ class AtsScanResult(BaseModel):
     bullet_audits: List[BulletAuditItem]
     actionable_checklist: List[ChecklistItem]
     metadata: ScanMetadata
+
+    # Additive contextual fields (strictly optional, default=None)
+    readiness: Optional[ReadinessAssessment] = None
+    analysis_mode: Optional[Literal["contextual_ai", "deterministic_structural", "legacy_deterministic"]] = None
+    confidence_level: Optional[Literal["high", "moderate", "low"]] = None
 
 
 class ScanTailoredRequest(BaseModel):

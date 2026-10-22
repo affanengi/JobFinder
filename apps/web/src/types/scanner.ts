@@ -36,6 +36,14 @@ export interface KeywordMatrix {
   transferable_count: number;
 }
 
+export interface BulletRubricBreakdown {
+  action_scope_score: number;
+  technical_substance_score: number;
+  outcome_credibility_score: number;
+  job_relevance_score: number;
+  rubric_notes: string[];
+}
+
 export interface BulletAuditItem {
   id: string;
   section: string;
@@ -49,6 +57,12 @@ export interface BulletAuditItem {
   verb?: string | null;
   word_count: number;
   issues: string[];
+
+  // Additive contextual fields (strictly optional)
+  rubric_breakdown?: BulletRubricBreakdown;
+  matched_requirement_ids?: string[];
+  evidence_classification?: "demonstrated" | "listed" | "transferable" | "none";
+  suggested_focus?: string;
 }
 
 export interface ChecklistItem {
@@ -72,6 +86,14 @@ export interface ScanMetadata {
   taxonomy_version: string;
 }
 
+export interface ReadinessAssessment {
+  core_alignment_tier: "high" | "moderate" | "low" | "unaligned";
+  substance_tier: "substantive" | "moderate" | "superficial";
+  parseability_tier: "optimal" | "acceptable" | "needs_reformatting";
+  mandatory_coverage_pct: number;
+  summary_verdict: string;
+}
+
 export interface AtsScanResult {
   overall_score: number;
   grade: "A+" | "A" | "B" | "C" | "D";
@@ -81,6 +103,11 @@ export interface AtsScanResult {
   bullet_audits: BulletAuditItem[];
   actionable_checklist: ChecklistItem[];
   metadata: ScanMetadata;
+
+  // Additive contextual fields (strictly optional)
+  readiness?: ReadinessAssessment;
+  analysis_mode?: "contextual_ai" | "deterministic_structural" | "legacy_deterministic";
+  confidence_level?: "high" | "moderate" | "low";
 }
 
 export interface OptimizedBulletItem {
