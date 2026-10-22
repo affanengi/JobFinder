@@ -113,6 +113,34 @@ async function stopOurBackendProcess() {
   backendProc = null;
 }
 
+function getProcessInfoOnPort(port) {
+  try {
+    if (process.platform === 'win32') {
+      const netstat = execSync(`netstat -ano | findstr :${port}`, { encoding: 'utf8' });
+      const lines = netstat.trim().split('\n');
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid && !isNaN(pid)) {
+          return { pid: parseInt(pid, 10), cmd: '' };
+        }
+      }
+    } else {
+      const pids = execSync(`lsof -ti :${port}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n');
+      for (const rawPid of pids) {
+        const pid = parseInt(rawPid.trim(), 10);
+        if (pid && !isNaN(pid)) {
+          const cmd = execSync(`ps -p ${pid} -o args=`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+          return { pid, cmd };
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 async function ensureBackendPortAvailable() {
   const inUse = await isPortInUse(8000);
   if (!inUse) return true;
@@ -125,11 +153,37 @@ async function ensureBackendPortAvailable() {
     console.log('\x1b[33m%s\x1b[0m', '⚠️  Port 8000 is occupied by an unresponsive owned backend process. Stopping...');
     await stopOurBackendProcess();
   } else {
-    // Port 8000 is occupied by an external/unrelated process. Do NOT blindly kill with fuser!
-    console.warn(
-      '\x1b[33m%s\x1b[0m',
-      '⚠️  Port 8000 is occupied by an external process not spawned by this runner. Preserving process without termination.'
+    // Check if the occupying process is an orphaned JobFinder / uvicorn instance
+    const procInfo = getProcessInfoOnPort(8000);
+    const isOrphanedJobFinder = procInfo && (
+      procInfo.cmd.includes('app.main:app') ||
+      procInfo.cmd.includes('jobFinder/apps/api') ||
+      procInfo.cmd.includes('uvicorn')
     );
+
+    if (isOrphanedJobFinder) {
+      console.log(
+        '\x1b[33m%s\x1b[0m',
+        `⚠️  Port 8000 is occupied by an unresponsive orphaned JobFinder backend process (PID: ${procInfo.pid}). Terminating...`
+      );
+      try {
+        if (process.platform !== 'win32') {
+          process.kill(-procInfo.pid, 'SIGKILL');
+        } else {
+          process.kill(procInfo.pid, 'SIGKILL');
+        }
+      } catch {
+        try {
+          process.kill(procInfo.pid, 'SIGKILL');
+        } catch {}
+      }
+    } else {
+      // Port 8000 is occupied by an external/unrelated process. Do NOT blindly kill with fuser!
+      console.warn(
+        '\x1b[33m%s\x1b[0m',
+        `⚠️  Port 8000 is occupied by an external process (${procInfo?.cmd?.slice(0, 60) || 'unknown'}). Preserving process without termination.`
+      );
+    }
   }
 
   for (let i = 0; i < 15; i++) {
@@ -151,11 +205,19 @@ async function startBackend() {
   isStartingBackend = true;
 
   try {
-    await ensureBackendPortAvailable();
+    const isPortReady = await ensureBackendPortAvailable();
+    if (!isPortReady) {
+      console.warn(
+        '\x1b[33m%s\x1b[0m',
+        '⚠️  FastAPI backend server cannot be started because port 8000 is occupied. Will retry on next health check cycle.'
+      );
+      return;
+    }
 
     let isRunning = await checkBackendRunning();
     if (!isRunning) {
       console.log('\x1b[36m%s\x1b[0m', '⚡ Starting FastAPI backend server on http://127.0.0.1:8000...');
+      const spawnTime = Date.now();
       backendProc = spawn(pythonPath, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000', '--reload'], {
         cwd: apiDir,
         stdio: ['ignore', 'inherit', 'inherit'],
@@ -169,10 +231,12 @@ async function startBackend() {
       backendProc.on('exit', (code, signal) => {
         backendProc = null;
         if (!isShuttingDown) {
-          console.warn('\x1b[33m%s\x1b[0m', `⚠️  FastAPI backend process exited (code: ${code}, signal: ${signal}). Auto-restarting in 2s...`);
+          const runDuration = Date.now() - spawnTime;
+          const retryDelay = runDuration < 3000 ? 5000 : 2000;
+          console.warn('\x1b[33m%s\x1b[0m', `⚠️  FastAPI backend process exited (code: ${code}, signal: ${signal}). Auto-restarting in ${retryDelay / 1000}s...`);
           setTimeout(() => {
             if (!isShuttingDown) startBackend();
-          }, 2000);
+          }, retryDelay);
         }
       });
 
@@ -180,6 +244,10 @@ async function startBackend() {
       const maxAttempts = 120;
       let attempts = 0;
       while (attempts < maxAttempts) {
+        if (!backendProc || !isOurProcessAlive(backendProc)) {
+          // Process exited early; terminate wait loop immediately
+          break;
+        }
         await new Promise((r) => setTimeout(r, 500));
         isRunning = await checkBackendRunning();
         if (isRunning) {
@@ -189,7 +257,9 @@ async function startBackend() {
         attempts++;
       }
 
-      if (!isRunning) {
+      if (!isRunning && (!backendProc || !isOurProcessAlive(backendProc))) {
+        // Process crash already reported by on('exit')
+      } else if (!isRunning) {
         console.error('\x1b[31m%s\x1b[0m', '❌ Backend failed to start on http://127.0.0.1:8000 within 60s.');
       }
     } else {
