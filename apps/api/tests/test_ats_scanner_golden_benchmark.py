@@ -16,10 +16,20 @@ Measures:
 """
 
 import pytest
+from typing import Any, TypedDict
 from app.services.ats_scanner_engine import ats_scanner_engine
 
 
-def make_resume(title: str, summary: str, bullets: list[str], skills: list[str]) -> dict:
+class BenchmarkPair(TypedDict):
+    id: str
+    domain: str
+    expected_band: str
+    is_negative: bool
+    job: dict[str, Any]
+    resume: dict[str, Any]
+
+
+def make_resume(title: str, summary: str, bullets: list[str], skills: list[str]) -> dict[str, Any]:
     return {
         "id": f"res_{title.lower().replace(' ', '_')}",
         "targetRole": title,
@@ -53,7 +63,7 @@ def make_resume(title: str, summary: str, bullets: list[str], skills: list[str])
     }
 
 
-def make_job(title: str, description: str, requirements: list[str], skills: list[str]) -> dict:
+def make_job(title: str, description: str, requirements: list[str], skills: list[str]) -> dict[str, Any]:
     return {
         "id": f"job_{title.lower().replace(' ', '_')}",
         "title": title,
@@ -64,7 +74,7 @@ def make_job(title: str, description: str, requirements: list[str], skills: list
 
 
 # Define the 50 Curated Golden Benchmark Pairs
-BENCHMARK_PAIRS = []
+BENCHMARK_PAIRS: list[BenchmarkPair] = []
 
 # ==========================================
 # 1. Backend & Distributed Systems (10 pairs)
