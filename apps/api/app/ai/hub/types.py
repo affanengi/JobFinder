@@ -18,6 +18,7 @@ class AITaskType(StrEnum):
     RESUME_PARSING = "resume_parsing"
     JOB_INGESTION = "job_ingestion"
     JOB_ANALYSIS = "job_analysis"
+    ATS_SCAN_ANALYSIS = "ats_scan_analysis"
 
 
 class ProviderType(StrEnum):

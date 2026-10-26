@@ -441,7 +441,7 @@ describe('AiApiHubSettings - Forensic Audit & Refinement Suite', () => {
     await waitFor(() => {
       expect(screen.getByText('Task Routing Map')).toBeDefined()
       expect(screen.getByText('Resume Tailoring')).toBeDefined()
-      expect(screen.getByText('ATS Scanner & Rewriter')).toBeDefined()
+      expect(screen.getByText('ATS Rewrite')).toBeDefined()
     })
 
     // Find select for Cover Letter Generation (which defaults to auto)

@@ -122,6 +122,16 @@ TASK_REQUIREMENTS_MAP: dict[AITaskType, TaskRequirements] = {
         minimum_context_window=16000,
         schema_required=True,
     ),
+    AITaskType.ATS_SCAN_ANALYSIS: TaskRequirements(
+        task=AITaskType.ATS_SCAN_ANALYSIS,
+        required_capabilities={
+            ModelCapability.STRUCTURED_OUTPUT,
+            ModelCapability.LONG_CONTEXT,
+            ModelCapability.HIGH_REASONING,
+        },
+        minimum_context_window=16000,
+        schema_required=True,
+    ),
 }
 
 
@@ -193,12 +203,31 @@ class AIRouter:
                 ]
             else:
                 # Default server credential
+                from app.ai.hub.task_key_normalizer import normalize_task_key
+                from app.core.config import settings
+
+                task_key_norm = normalize_task_key(request.task)
+                server_key: str | None = None
+                if provider_type == ProviderType.GEMINI:
+                    if task_key_norm == "ats_scan_analysis":
+                        server_key = settings.SCANNER_GEMINI_API_KEY or settings.GEMINI_API_KEY or None
+                    elif task_key_norm == "resume_tailoring":
+                        server_key = settings.RESUME_GEMINI_API_KEY or settings.GEMINI_API_KEY or None
+                    elif task_key_norm == "qa_copilot":
+                        server_key = settings.QA_COPILOT_GEMINI_API_KEY or settings.GEMINI_API_KEY or None
+                    else:
+                        server_key = settings.GEMINI_API_KEY or None
+                elif provider_type == ProviderType.OPENROUTER:
+                    server_key = settings.OPENROUTER_API_KEY or None
+                elif provider_type == ProviderType.GROQ:
+                    server_key = settings.GROQ_API_KEY or None
+
                 cred_list = [
                     (
                         f"server_{provider_type.value}_credential",
                         None,
                         CredentialTier.FREE_TIER,
-                        None,
+                        server_key,
                     )
                 ]
 
@@ -244,19 +273,14 @@ class AIRouter:
                     # 2. Hierarchical Preference Tiers:
                     # Tier 1 (0): Exact Preferred Credential or Provider Preference
                     # Tier 2 (10000): Intra-provider sibling credentials under same provider
-                    # Tier 3 (20000 + provider_idx * 10000): Alternate providers
+                    # Tier 3 (20000 + provider_idx * 10000): Alternate user-configured providers / default when no personal creds
+                    # Tier 4 (60000 + provider_idx * 10000): Server default when user has other configured personal credentials
                     task_key = (
                         request.task.value if hasattr(request.task, "value") else str(request.task)
                     )
-                    aliases = [task_key, str(request.task)]
-                    if task_key == "resume_tailoring":
-                        aliases.append("resume_generation")
-                    elif task_key == "resume_generation":
-                        aliases.append("resume_tailoring")
-                    elif task_key == "cover_letter_gen":
-                        aliases.append("cover_letter_generation")
-                    elif task_key == "cover_letter_generation":
-                        aliases.append("cover_letter_gen")
+                    from app.ai.hub.task_key_normalizer import get_task_aliases
+
+                    aliases = get_task_aliases(request.task) or [task_key, str(request.task)]
 
                     preferred_target = None
                     for k in aliases:
@@ -284,14 +308,25 @@ class AIRouter:
                             ):
                                 is_preferred_provider = True
 
+                    is_server_cred = cred_id.startswith("server_")
+
                     if is_exact_preferred_cred:
                         base_tier = 0
                     elif is_preferred_provider:
                         base_tier = 0
                     elif is_sibling_of_preferred_cred:
                         base_tier = 10000
-                    else:
+                    elif not is_server_cred:
                         base_tier = 20000 + (provider_idx * 10000)
+                    else:
+                        # Server default credential
+                        user_has_active_creds = any(c.is_active for c in user_profile.credentials)
+                        if user_has_active_creds:
+                            # User configured personal credentials: server default acts as fallback (Tier 4)
+                            base_tier = 60000 + (provider_idx * 10000)
+                        else:
+                            # User has no personal credentials: server default participates as application default (Tier 3)
+                            base_tier = 20000 + (provider_idx * 10000)
 
                     # Remove raw credential-array-index bias (cred_idx * 100).
                     # Check if this sibling credential is explicitly preferred for another task:

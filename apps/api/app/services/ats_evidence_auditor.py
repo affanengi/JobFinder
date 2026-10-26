@@ -18,6 +18,17 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from app.schemas.ats_analysis import (
+    AtsAnalysisResult,
+    EvidenceAuditFinding,
+    EvidenceViolationSeverity,
+    GroundedRewriteProposalItem,
+    JobRequirementAnalysisItem,
+    RequirementMatchStatus,
+    RewriteValidationStatus,
+    TruthLockAuditReport,
+    ValidationStatus,
+)
 from app.schemas.job_analysis import (
     AtsEvidenceAuditReport,
     AtsEvidenceItem,
@@ -275,6 +286,289 @@ class AtsEvidenceAuditorService:
             missingRequirements=list(set(missing_requirements)),
             summary=summary,
             auditedAt=datetime.now(UTC).isoformat(),
+        )
+
+    # =========================================================================
+    # PHASE 4: DETERMINISTIC TRUTH-LOCK EVIDENCE AUDITING
+    # =========================================================================
+
+    @staticmethod
+    def normalize_whitespace(text: str) -> str:
+        """Collapse multiple spaces, newlines, and tabs into a single space, and strip."""
+        if not text:
+            return ""
+        return re.sub(r"\s+", " ", text).strip()
+
+    @classmethod
+    def is_exact_quotation_present(
+        cls, quote: str, source_text: str, min_chars: int = 5
+    ) -> bool:
+        """Verify whether a cited quotation is an exact substring of source text with permitted whitespace normalization.
+
+        Permitted normalization:
+        - Collapsing multiple consecutive spaces, newlines, and tabs into a single space.
+        - Case-insensitive substring matching.
+        - Quotations shorter than min_chars are rejected as insufficiently specific.
+        """
+        if not quote or not source_text:
+            return False
+        clean_quote = cls.normalize_whitespace(quote).lower()
+        if len(clean_quote) < min_chars:
+            return False
+        clean_source = cls.normalize_whitespace(source_text).lower()
+        return clean_quote in clean_source
+
+    @staticmethod
+    def extract_metrics_and_numbers(text: str) -> set[str]:
+        """Extract numerical metrics, percentages, dollar amounts, and quantified figures."""
+        patterns = re.findall(
+            r"\b(?:\$\d+(?:\.\d+)?[kKmMbB]?|\d+(?:\.\d+)?%|\d+(?:\.\d+)?[kKmMbB]\b|\d+\+?\s*(?:years?|yrs?|months?|x|X)\b)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return {p.lower().strip() for p in patterns}
+
+    def audit_contextual_analysis(
+        self,
+        analysis: AtsAnalysisResult,
+        raw_resume_text: str,
+        profile: Profile | None = None,
+        job_description: str | None = None,
+        authenticated_user_id: str | None = None,
+    ) -> TruthLockAuditReport:
+        """Deterministically audit an AI-generated AtsAnalysisResult for evidence grounding and truth lock.
+
+        CRITICAL ARCHITECTURAL GUARANTEE:
+        This method NEVER modifies, recalculates, or deducts from analysis.overall_score.
+        """
+        # Tenant isolation check:
+        if profile and authenticated_user_id:
+            if profile.userId != authenticated_user_id:
+                raise PermissionError(
+                    f"Tenant isolation violation: profile userId '{profile.userId}' does not match authenticated user '{authenticated_user_id}'."
+                )
+
+        norm_resume = self.normalize_whitespace(raw_resume_text)
+        findings: list[EvidenceAuditFinding] = []
+        total_checks = 0
+        passed_checks = 0
+
+        # Extract verified facts from Profile if provided
+        profile_norm_map: dict[str, list[str]] = {}
+        profile_entities: set[str] = set()
+        if profile:
+            profile_norm_map, profile_entities = self._extract_profile_verified_entities(profile)
+
+        # 1. Job Requirement Analysis Audit
+        for idx, req in enumerate(analysis.requirements):
+            total_checks += 1
+            req_id = f"req_{idx + 1}: {req.requirement_description[:40]}"
+
+            # Check: A requirement marked MEETS must have evidence in resume or verified profile
+            if req.match_status == RequirementMatchStatus.MEETS:
+                if not req.supporting_evidence:
+                    findings.append(
+                        EvidenceAuditFinding(
+                            target_type="requirement",
+                            target_identifier=req_id,
+                            status=ValidationStatus.FAIL,
+                            severity=EvidenceViolationSeverity.BLOCKING,
+                            evidence_source="resume",
+                            cited_text=None,
+                            reason="Requirement marked MEETS has zero supporting evidence citations.",
+                            is_blocking=True,
+                        )
+                    )
+                else:
+                    # Validate cited quotations
+                    has_at_least_one_verified_quote = False
+                    for q in req.supporting_evidence:
+                        if not q.strip() or len(q.strip()) < 5:
+                            findings.append(
+                                EvidenceAuditFinding(
+                                    target_type="requirement",
+                                    target_identifier=req_id,
+                                    status=ValidationStatus.FAIL,
+                                    severity=EvidenceViolationSeverity.ADVISORY,
+                                    evidence_source="resume",
+                                    cited_text=q,
+                                    reason="Cited evidence quote is empty or too generic (< 5 characters) to substantiate a claim.",
+                                    is_blocking=False,
+                                )
+                            )
+                        elif self.is_exact_quotation_present(q, norm_resume):
+                            has_at_least_one_verified_quote = True
+                        else:
+                            # Not found in resume: check if it's a JD excerpt incorrectly attributed to candidate
+                            if job_description and self.is_exact_quotation_present(q, job_description):
+                                findings.append(
+                                    EvidenceAuditFinding(
+                                        target_type="requirement",
+                                        target_identifier=req_id,
+                                        status=ValidationStatus.FAIL,
+                                        severity=EvidenceViolationSeverity.BLOCKING,
+                                        evidence_source="job_description",
+                                        cited_text=q,
+                                        reason="Job description text was cited as candidate evidence without appearing in the resume.",
+                                        is_blocking=True,
+                                    )
+                                )
+                            else:
+                                findings.append(
+                                    EvidenceAuditFinding(
+                                        target_type="requirement",
+                                        target_identifier=req_id,
+                                        status=ValidationStatus.FAIL,
+                                        severity=EvidenceViolationSeverity.BLOCKING,
+                                        evidence_source="resume",
+                                        cited_text=q,
+                                        reason="Fabricated or ungrounded quotation: cited text does not exist in the candidate's resume.",
+                                        is_blocking=True,
+                                    )
+                                )
+
+                    if has_at_least_one_verified_quote:
+                        passed_checks += 1
+                        findings.append(
+                            EvidenceAuditFinding(
+                                target_type="requirement",
+                                target_identifier=req_id,
+                                status=ValidationStatus.PASS,
+                                severity=EvidenceViolationSeverity.ADVISORY,
+                                evidence_source="resume",
+                                cited_text="; ".join(req.supporting_evidence[:2]),
+                                reason="Demonstrated requirement substantiated by verified resume text quotation.",
+                                is_blocking=False,
+                            )
+                        )
+            elif req.match_status == RequirementMatchStatus.MISSING:
+                # Nuance check: Ensure missing_evidence distinction is respected
+                passed_checks += 1
+                findings.append(
+                    EvidenceAuditFinding(
+                        target_type="requirement",
+                        target_identifier=req_id,
+                        status=ValidationStatus.PASS,
+                        severity=EvidenceViolationSeverity.ADVISORY,
+                        evidence_source="resume",
+                        cited_text=None,
+                        reason="Missing requirement correctly identified as unproven in candidate submission.",
+                        is_blocking=False,
+                    )
+                )
+            else:  # PARTIAL
+                passed_checks += 1
+
+        # 2. Grounded Rewrite Proposals Audit
+        for idx, prop in enumerate(analysis.rewrite_proposals):
+            total_checks += 1
+            prop_id = f"rewrite_{idx + 1}"
+
+            # Check A: original_text must exist in resume
+            orig_present = self.is_exact_quotation_present(prop.original_text, norm_resume, min_chars=5)
+            if not orig_present:
+                findings.append(
+                    EvidenceAuditFinding(
+                        target_type="rewrite_proposal",
+                        target_identifier=prop_id,
+                        status=ValidationStatus.FAIL,
+                        severity=EvidenceViolationSeverity.BLOCKING,
+                        evidence_source="resume",
+                        cited_text=prop.original_text,
+                        reason="Original text cited in rewrite proposal does not exist in the candidate's submitted resume.",
+                        is_blocking=True,
+                    )
+                )
+                prop.validation_status = RewriteValidationStatus.UNVERIFIED
+                continue
+
+            # Check B: Proposed text must not invent new ungrounded metrics or figures
+            orig_metrics = self.extract_metrics_and_numbers(prop.original_text)
+            prop_metrics = self.extract_metrics_and_numbers(prop.proposed_text)
+            new_metrics = prop_metrics - orig_metrics
+
+            if new_metrics:
+                findings.append(
+                    EvidenceAuditFinding(
+                        target_type="rewrite_proposal",
+                        target_identifier=prop_id,
+                        status=ValidationStatus.FAIL,
+                        severity=EvidenceViolationSeverity.BLOCKING,
+                        evidence_source="resume",
+                        cited_text=f"New metrics: {', '.join(sorted(new_metrics))}",
+                        reason=f"Rewrite proposal fabricates ungrounded numerical metrics or percentages: {sorted(new_metrics)}",
+                        is_blocking=True,
+                    )
+                )
+                prop.validation_status = RewriteValidationStatus.UNVERIFIED
+            else:
+                passed_checks += 1
+                prop.validation_status = RewriteValidationStatus.GROUNDED
+                findings.append(
+                    EvidenceAuditFinding(
+                        target_type="rewrite_proposal",
+                        target_identifier=prop_id,
+                        status=ValidationStatus.PASS,
+                        severity=EvidenceViolationSeverity.ADVISORY,
+                        evidence_source="resume",
+                        cited_text=prop.proposed_text[:60],
+                        reason="Rewrite proposal preserves factual scope and original evidence without hallucination.",
+                        is_blocking=False,
+                    )
+                )
+
+        # 3. Contextual Keyword Citations Audit
+        for idx, kw in enumerate(analysis.keyword_analysis):
+            if kw.supporting_evidence:
+                total_checks += 1
+                kw_id = f"keyword_{kw.keyword}"
+                if not self.is_exact_quotation_present(kw.supporting_evidence, norm_resume, min_chars=3):
+                    findings.append(
+                        EvidenceAuditFinding(
+                            target_type="keyword",
+                            target_identifier=kw_id,
+                            status=ValidationStatus.FAIL,
+                            severity=EvidenceViolationSeverity.ADVISORY,
+                            evidence_source="resume",
+                            cited_text=kw.supporting_evidence,
+                            reason=f"Supporting quote for keyword '{kw.keyword}' not found in candidate resume text.",
+                            is_blocking=False,
+                        )
+                    )
+                else:
+                    passed_checks += 1
+
+        blocking_count = sum(1 for f in findings if f.is_blocking)
+        advisory_count = sum(1 for f in findings if not f.is_blocking and f.status != ValidationStatus.PASS)
+
+        if blocking_count == 0 and advisory_count == 0:
+            overall_status = ValidationStatus.PASS
+            is_valid = True
+        elif blocking_count == 0:
+            overall_status = ValidationStatus.REVIEW_REQUIRED
+            is_valid = True
+        else:
+            overall_status = ValidationStatus.FAIL
+            is_valid = False
+
+        summary = (
+            f"Truth-Lock Evidence Audit: {overall_status.value.upper()} "
+            f"({passed_checks}/{max(total_checks, 1)} checks passed, "
+            f"{blocking_count} blocking violations, {advisory_count} advisory warnings). "
+            f"AI Contextual Score preserved: {analysis.overall_score}/100."
+        )
+
+        return TruthLockAuditReport(
+            is_valid=is_valid,
+            status=overall_status,
+            total_checks=total_checks,
+            passed_checks=passed_checks,
+            blocking_violations_count=blocking_count,
+            advisory_warnings_count=advisory_count,
+            findings=findings,
+            original_ai_score=analysis.overall_score,  # CRITICAL: strictly unmodified
+            summary=summary,
+            audited_at=datetime.now(UTC).isoformat(),
         )
 
 

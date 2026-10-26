@@ -6,6 +6,7 @@ import {
   KeywordMatchDetail,
   BulletAuditItem,
   ChecklistItem,
+  JobRequirementMatchItem,
 } from '../types/scanner';
 
 /**
@@ -295,6 +296,125 @@ function createHeroCard(report: AtsScanResult): HTMLElement {
         </div>
       </div>
     </div>
+
+    <!-- Readiness & Analysis Mode Disclosures (Contextual vs Legacy) -->
+    ${report.readiness ? `
+      <div style="margin-top: 12px; padding: 10px 12px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span style="font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 700; text-transform: uppercase; color: #a1a1aa;">
+            Readiness Verdict: <span style="color: #ffffff;">${escapeHtml(report.readiness.summary_verdict)}</span>
+          </span>
+          <span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; color: #38bdf8; font-weight: 600;">
+            Mandatory Coverage: ${report.readiness.mandatory_coverage_pct}%
+          </span>
+        </div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+          <span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: #d4d4d8;">
+            Core: ${escapeHtml(report.readiness.core_alignment_tier)}
+          </span>
+          <span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: #d4d4d8;">
+            Substance: ${escapeHtml(report.readiness.substance_tier)}
+          </span>
+          <span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: #d4d4d8;">
+            Parseability: ${escapeHtml(report.readiness.parseability_tier)}
+          </span>
+          ${report.analysis_mode ? `
+            <span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 4px; background: rgba(139, 92, 246, 0.12); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.3);">
+              ${escapeHtml(report.analysis_mode)}
+            </span>
+          ` : ''}
+          ${report.confidence_level ? `
+            <span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 4px; background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3);">
+              Confidence: ${escapeHtml(report.confidence_level)}
+            </span>
+          ` : ''}
+        </div>
+      </div>
+    ` : `
+      <div style="margin-top: 10px; font-size: 9px; font-family: 'JetBrains Mono', monospace; color: #71717a;">
+        ℹ Legacy Deterministic Report Format • Advanced contextual readiness not evaluated
+      </div>
+    `}
+  `;
+
+  return card;
+}
+
+/**
+ * Builds Job Description Requirement Match Explorer summary card for PDF exports.
+ */
+function createRequirementCoverageCard(items: JobRequirementMatchItem[]): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'ats-requirement-map-card';
+  card.style.backgroundColor = '#161616';
+  card.style.border = '1px solid rgba(255, 255, 255, 0.12)';
+  card.style.borderRadius = '12px';
+  card.style.padding = '12px 14px';
+  card.style.boxSizing = 'border-box';
+
+  const mandatory = items.filter((m) => m.is_mandatory);
+  const preferred = items.filter((m) => !m.is_mandatory);
+
+  const getBadgeStyle = (status: string) => {
+    switch (status) {
+      case 'demonstrated':
+        return { color: '#34d399', bg: 'rgba(52, 211, 153, 0.12)', label: 'Demonstrated' };
+      case 'listed':
+        return { color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.12)', label: 'Listed' };
+      case 'missing':
+        return { color: '#f87171', bg: 'rgba(248, 113, 113, 0.12)', label: 'Missing in Resume' };
+      default:
+        return { color: '#a1a1aa', bg: 'rgba(255, 255, 255, 0.08)', label: 'Unverified' };
+    }
+  };
+
+  const renderSection = (title: string, list: JobRequirementMatchItem[]) => {
+    if (list.length === 0) return '';
+    const rows = list.map((item) => {
+      const b = getBadgeStyle(item.evidence_status);
+      const evidenceQuote = item.linked_evidence && item.linked_evidence.length > 0
+        ? `• Evidence: "${escapeHtml(item.linked_evidence[0].quote)}"`
+        : '• No direct resume evidence detected';
+
+      return `
+        <div style="padding: 6px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div style="min-width: 0; flex: 1;">
+              <span style="font-size: 11px; font-weight: 600; color: #ffffff;">${escapeHtml(item.name)}</span>
+              ${item.category ? `<span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; color: #a1a1aa; margin-left: 6px;">[${escapeHtml(item.category)}]</span>` : ''}
+              <div style="font-size: 9px; color: #a1a1aa; line-height: 1.4; margin-top: 2px;">
+                ${evidenceQuote}
+              </div>
+            </div>
+            <span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: ${b.color}; background: ${b.bg}; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; flex-shrink: 0;">
+              ${b.label}
+            </span>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div style="margin-top: 8px;">
+        <div style="font-size: 10px; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: #d4d4d8; text-transform: uppercase; margin-bottom: 4px;">
+          ${escapeHtml(title)} (${list.length})
+        </div>
+        ${rows}
+      </div>
+    `;
+  };
+
+  card.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 6px; margin-bottom: 8px;">
+      <span style="font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: 0.05em; color: #ffffff;">
+        Job Description Requirement Match Map (${items.length} Tracked)
+      </span>
+      <span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; color: #a1a1aa;">
+        Mandatory vs Preferred Alignment
+      </span>
+    </div>
+    ${renderSection('Mandatory Qualifications', mandatory)}
+    ${renderSection('Preferred Qualifications', preferred)}
   `;
 
   return card;
@@ -633,6 +753,38 @@ function createBulletAuditCard(bullet: BulletAuditItem, index: number): HTMLElem
       ${escapeHtml(bullet.text)}
     </div>
 
+    ${bullet.rubric_breakdown ? `
+      <!-- 4-Dimension Rubric Meter -->
+      <div style="margin-top: 8px; padding: 6px 10px; background: #0a0a0c; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 6px;">
+        <div style="font-size: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 700; text-transform: uppercase; color: #a1a1aa; margin-bottom: 4px;">
+          4-Dimension Rubric Evaluation
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center;">
+          <div style="background: rgba(255, 255, 255, 0.02); padding: 4px; border-radius: 4px;">
+            <div style="font-size: 8px; font-family: 'JetBrains Mono', monospace; color: #888888;">Action/Scope</div>
+            <div style="font-size: 10px; font-weight: 700; color: #34d399; font-family: 'JetBrains Mono', monospace;">${bullet.rubric_breakdown.action_scope_score}/25</div>
+          </div>
+          <div style="background: rgba(255, 255, 255, 0.02); padding: 4px; border-radius: 4px;">
+            <div style="font-size: 8px; font-family: 'JetBrains Mono', monospace; color: #888888;">Substance</div>
+            <div style="font-size: 10px; font-weight: 700; color: #34d399; font-family: 'JetBrains Mono', monospace;">${bullet.rubric_breakdown.technical_substance_score}/25</div>
+          </div>
+          <div style="background: rgba(255, 255, 255, 0.02); padding: 4px; border-radius: 4px;">
+            <div style="font-size: 8px; font-family: 'JetBrains Mono', monospace; color: #888888;">Credibility</div>
+            <div style="font-size: 10px; font-weight: 700; color: #34d399; font-family: 'JetBrains Mono', monospace;">${bullet.rubric_breakdown.outcome_credibility_score}/25</div>
+          </div>
+          <div style="background: rgba(255, 255, 255, 0.02); padding: 4px; border-radius: 4px;">
+            <div style="font-size: 8px; font-family: 'JetBrains Mono', monospace; color: #888888;">Relevance</div>
+            <div style="font-size: 10px; font-weight: 700; color: #34d399; font-family: 'JetBrains Mono', monospace;">${bullet.rubric_breakdown.job_relevance_score}/25</div>
+          </div>
+        </div>
+        ${bullet.suggested_focus ? `
+          <div style="font-size: 9px; font-family: 'JetBrains Mono', monospace; color: #38bdf8; margin-top: 4px;">
+            Target Focus: ${escapeHtml(bullet.suggested_focus)}
+          </div>
+        ` : ''}
+      </div>
+    ` : ''}
+
     ${issuesHtml}
   `;
 
@@ -758,6 +910,12 @@ export function buildStructuredA4Pages(
     if (report.actionable_checklist && report.actionable_checklist.length > 0) {
       const checklistCard = createChecklistCard(report.actionable_checklist);
       appendBlockToPages(checklistCard);
+    }
+
+    // 4.5. Job Description Requirement Match Explorer (if present)
+    if (report.requirement_matches && report.requirement_matches.length > 0) {
+      const reqCard = createRequirementCoverageCard(report.requirement_matches);
+      appendBlockToPages(reqCard);
     }
 
     // 5. Bullet-by-Bullet Impact & Metric Audits (Dynamic bullet count & measurement pagination)
@@ -1029,6 +1187,16 @@ export function downloadAtsReportHtml(
       const bScore = b.score;
       const bScoreColor = getScoreColor(bScore);
       const bScoreBg = getScoreBg(bScore);
+      const rubricHtml = b.rubric_breakdown
+        ? `
+          <div style="display: flex; gap: 10px; margin-top: 8px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #a1a1aa; flex-wrap: wrap;">
+            <span>Action: <strong style="color: #34d399;">${b.rubric_breakdown.action_scope_score}/25</strong></span>
+            <span>Substance: <strong style="color: #34d399;">${b.rubric_breakdown.technical_substance_score}/25</strong></span>
+            <span>Credibility: <strong style="color: #34d399;">${b.rubric_breakdown.outcome_credibility_score}/25</strong></span>
+            <span>Relevance: <strong style="color: #34d399;">${b.rubric_breakdown.job_relevance_score}/25</strong></span>
+          </div>
+        `
+        : '';
 
       return `
         <div class="bullet-card">
@@ -1039,6 +1207,7 @@ export function downloadAtsReportHtml(
             </span>
           </div>
           <p class="bullet-text">${bText}</p>
+          ${rubricHtml}
         </div>
       `;
     })
@@ -1154,6 +1323,11 @@ export function downloadAtsReportHtml(
           </div>
           <div class="hero-title">ATS Executive Diagnostic Summary</div>
           <div class="hero-summary">${safeSummary}</div>
+          ${report.readiness ? `
+            <div style="margin-top: 10px; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: #38bdf8;">
+              Readiness: ${escapeHtml(report.readiness.summary_verdict)} (${report.readiness.mandatory_coverage_pct}% mandatory coverage)
+            </div>
+          ` : ''}
         </div>
 
         <div class="stats-row">
@@ -1186,6 +1360,30 @@ export function downloadAtsReportHtml(
         ${missingKeywordsHtml}
       </div>
     </div>
+
+    ${(report.requirement_matches && report.requirement_matches.length > 0) ? `
+    <!-- Requirement Match Map -->
+    <div class="card">
+      <div class="section-head">
+        <div class="section-title">Job Description Requirement Match Map (${report.requirement_matches.length})</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        ${report.requirement_matches.map(rm => `
+          <div style="background: #0D0D0D; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 10px; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <div style="font-size: 12px; font-weight: 600; color: #ffffff;">${escapeHtml(rm.name)} ${rm.is_mandatory ? '<span style="font-size: 9px; color: #f87171; font-family: monospace;">[MANDATORY]</span>' : '<span style="font-size: 9px; color: #a1a1aa; font-family: monospace;">[PREFERRED]</span>'}</div>
+              <div style="font-size: 11px; color: #a1a1aa; margin-top: 2px;">
+                ${rm.linked_evidence && rm.linked_evidence.length > 0 ? `Evidence: "${escapeHtml(rm.linked_evidence[0].quote)}"` : 'No linked resume bullet evidence'}
+              </div>
+            </div>
+            <span style="font-size: 9px; font-family: monospace; font-weight: 700; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; background: rgba(255,255,255,0.06);">
+              ${escapeHtml(rm.evidence_status)}
+            </span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
 
     <!-- Bullet Impact Audits -->
     <div class="card">

@@ -300,15 +300,9 @@ class AIOrchestrator:
 
         # Resolve preferred credential for task (for observability and skip-reason tracking)
         task_key = request.task.value if hasattr(request.task, "value") else str(request.task)
-        aliases = [task_key, str(request.task)]
-        if task_key == "resume_tailoring":
-            aliases.append("resume_generation")
-        elif task_key == "resume_generation":
-            aliases.append("resume_tailoring")
-        elif task_key == "cover_letter_gen":
-            aliases.append("cover_letter_generation")
-        elif task_key == "cover_letter_generation":
-            aliases.append("cover_letter_gen")
+        from app.ai.hub.task_key_normalizer import get_task_aliases
+
+        aliases = get_task_aliases(request.task) or [task_key, str(request.task)]
 
         preferred_cred_id: str | None = None
         if user_profile and user_profile.task_routing:

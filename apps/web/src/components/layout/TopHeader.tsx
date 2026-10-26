@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Search, LogIn, LogOut, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useSync } from '../../context/SyncContext';
 import { AuthModal } from '../auth/AuthModal';
 import { LogoutConfirmModal } from '../auth/LogoutConfirmModal';
 import { SyncStatusBadge } from '../common/SyncStatusBadge';
@@ -12,8 +13,11 @@ interface TopHeaderProps {
 
 export const TopHeader: React.FC<TopHeaderProps> = ({ pageTitle, pageSubtitle }) => {
   const { user, logout } = useAuth();
+  const { status: syncStatus, isOnline } = useSync();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+
+  const isDegraded = !isOnline || syncStatus === 'DEGRADED';
 
   return (
     <>
@@ -48,18 +52,37 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ pageTitle, pageSubtitle })
               >
                 <LogOut className="w-3.5 h-3.5" />
               </button>
+
+              {/* Connected to cloud indicator dot */}
+              <div
+                className={`flex items-center justify-center p-1.5 rounded-full ${
+                  isDegraded
+                    ? 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
+                    : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
+                }`}
+                title={isDegraded ? 'Cloud Sync Degraded · Offline or Persistence Issue' : 'Connected to Cloud'}
+                aria-label={isDegraded ? 'Cloud Sync Degraded' : 'Connected to Cloud'}
+              >
+                <span className="relative flex h-2 w-2">
+                  {!isDegraded && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  )}
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isDegraded ? 'bg-rose-500' : 'bg-emerald-400'}`}></span>
+                </span>
+              </div>
             </div>
           ) : (
-            <button
-              onClick={() => setIsAuthModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-black hover:bg-neutral-200 text-xs font-semibold transition-colors cursor-pointer"
-            >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>Sign In / Sync</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsAuthModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white text-black hover:bg-neutral-200 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign In / Sync</span>
+              </button>
+              <SyncStatusBadge />
+            </div>
           )}
-
-          <SyncStatusBadge />
         </div>
       </header>
 

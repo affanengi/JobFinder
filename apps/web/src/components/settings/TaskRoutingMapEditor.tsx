@@ -12,6 +12,7 @@ import {
   Info,
   Plus,
   Minus,
+  ShieldCheck,
 } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 
@@ -49,6 +50,8 @@ const getTaskRouteTarget = (routing: Record<string, string>, taskKey: string): s
   if (taskKey === 'resume_tailoring' && routing['resume_generation']) return routing['resume_generation']
   if (taskKey === 'cover_letter_generation' && routing['cover_letter_gen']) return routing['cover_letter_gen']
   if (taskKey === 'cover_letter_gen' && routing['cover_letter_generation']) return routing['cover_letter_generation']
+  if (taskKey === 'ats_scan_analysis' && (routing['ats_scanner'] || routing['ats_scan'])) return routing['ats_scanner'] || routing['ats_scan']
+  if (taskKey === 'ats_bulk_rewrite' && routing['ats_bullet_rewrite']) return routing['ats_bullet_rewrite']
   return undefined
 }
 
@@ -77,10 +80,17 @@ const TASK_DEFINITIONS: TaskDefinition[] = [
   },
   {
     key: 'ats_bulk_rewrite',
-    name: 'ATS Scanner & Rewriter',
+    name: 'ATS Rewrite',
     badge: 'Fast Inference',
     description: 'Rewrites resume content and improves alignment with target requirements.',
     icon: Zap,
+  },
+  {
+    key: 'ats_scan_analysis',
+    name: 'ATS Scan',
+    badge: 'Truth-Lock',
+    description: 'Evaluates resume alignment, extracts requirement matches, and audits factual evidence.',
+    icon: ShieldCheck,
   },
   {
     key: 'qa_copilot',

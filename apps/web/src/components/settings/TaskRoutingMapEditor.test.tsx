@@ -44,10 +44,11 @@ describe('TaskRoutingMapEditor Component', () => {
       />
     )
 
-    // Verify 6 tasks
+    // Verify tasks
     expect(screen.getByText('Resume Tailoring')).toBeDefined()
     expect(screen.getByText('Cover Letter Generation')).toBeDefined()
-    expect(screen.getByText('ATS Scanner & Rewriter')).toBeDefined()
+    expect(screen.getByText('ATS Rewrite')).toBeDefined()
+    expect(screen.getByText('ATS Scan')).toBeDefined()
     expect(screen.getByText('Q&A Co-pilot Answerer')).toBeDefined()
     expect(screen.getByText('Resume PDF Parser')).toBeDefined()
     expect(screen.getByText('Job Discovery & Ingestion')).toBeDefined()
@@ -140,8 +141,8 @@ describe('TaskRoutingMapEditor Component', () => {
       />
     )
 
-    // Click output handle on ATS Scanner
-    const atsHandle = screen.getByTitle('Drag or click to route ATS Scanner & Rewriter')
+    // Click output handle on ATS Rewrite
+    const atsHandle = screen.getByTitle('Drag or click to route ATS Rewrite')
     fireEvent.click(atsHandle)
 
     // Click input handle on Paid OpenRouter
@@ -422,7 +423,7 @@ describe('TaskRoutingMapEditor Component', () => {
     )
 
     // Check capability badges
-    expect(screen.getByText('Truth-Lock')).toBeDefined()
+    expect(screen.getAllByText('Truth-Lock').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Pydantic Schema')).toBeDefined()
     expect(screen.getByText('Fast Inference')).toBeDefined()
     expect(screen.getByText('Deterministic')).toBeDefined()

@@ -19,6 +19,9 @@ TASK_KEY_CANONICAL_MAP: dict[str, str] = {
     "resume_parsing": AITaskType.RESUME_PARSING.value,
     "job_ingestion": AITaskType.JOB_INGESTION.value,
     "job_analysis": AITaskType.JOB_ANALYSIS.value,
+    "ats_scan_analysis": AITaskType.ATS_SCAN_ANALYSIS.value,
+    "ats_scanner": AITaskType.ATS_SCAN_ANALYSIS.value,
+    "ats_scan": AITaskType.ATS_SCAN_ANALYSIS.value,
 }
 
 

@@ -95,6 +95,7 @@ class ScanMetadata(BaseModel):
     word_count: int = 0
     estimated_read_time: str = "45 sec"
     taxonomy_version: str = "1.0.0"
+    scoring_version: str = "v1_heuristic"
 
 
 class ReadinessAssessment(BaseModel):
@@ -103,6 +104,24 @@ class ReadinessAssessment(BaseModel):
     parseability_tier: Literal["optimal", "acceptable", "needs_reformatting"]
     mandatory_coverage_pct: float
     summary_verdict: str
+
+
+class RequirementEvidenceItem(BaseModel):
+    bullet_id: str
+    quote: str
+    role_or_project: Optional[str] = None
+    section: Optional[str] = None
+
+
+class JobRequirementMatchItem(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    category: Optional[str] = None
+    is_mandatory: bool = True
+    evidence_status: Literal["demonstrated", "listed", "missing", "unverified"] = "unverified"
+    explanation: Optional[str] = None
+    linked_evidence: List[RequirementEvidenceItem] = Field(default_factory=list)
 
 
 class AtsScanResult(BaseModel):
@@ -117,6 +136,7 @@ class AtsScanResult(BaseModel):
 
     # Additive contextual fields (strictly optional, default=None)
     readiness: Optional[ReadinessAssessment] = None
+    requirement_matches: Optional[List[JobRequirementMatchItem]] = None
     analysis_mode: Optional[Literal["contextual_ai", "deterministic_structural", "legacy_deterministic"]] = None
     confidence_level: Optional[Literal["high", "moderate", "low"]] = None
 
@@ -181,6 +201,28 @@ class BulkAiBulletRewriteResponse(BaseModel):
     validation_passed: bool
 
 
+# Import AI-First contextual schemas for unified schema discovery and report snapshots
+from app.schemas.ats_analysis import (
+    AtsAnalysisResult,
+    AtsScanRequest,
+    AtsScanResponse,
+    ContextualKeywordItem,
+    EvidenceAuditFinding,
+    EvidenceViolationSeverity,
+    GroundedRewriteProposalItem,
+    JobRequirementAnalysisItem,
+    KeywordCoverageStatus,
+    RequirementCriticality,
+    RequirementMatchStatus,
+    ResumeSectionAnalysisItem,
+    RewriteValidationStatus,
+    ScanProvenanceMetadata,
+    SectionName,
+    TruthLockAuditReport,
+    ValidationStatus,
+)
+
+
 # =========================================================================
 # IMMUTABLE SAVED ATS SCAN REPORT SCHEMAS
 # =========================================================================
@@ -199,6 +241,10 @@ class SavedScanReportDTO(BaseModel):
     grade: str
     scanResult: AtsScanResult
     taxonomyVersion: str = "1.0.0"
+    scoring_version: str = "v1_heuristic"
+    ai_analysis: Optional[AtsAnalysisResult] = None
+    audit_report: Optional[TruthLockAuditReport] = None
+    provenance: Optional[ScanProvenanceMetadata] = None
     createdAt: str
     updatedAt: str
 
@@ -206,3 +252,8 @@ class SavedScanReportDTO(BaseModel):
 class SaveScanReportRequest(BaseModel):
     reportName: Optional[str] = None
     scanResult: AtsScanResult
+    scoring_version: Optional[str] = "v1_heuristic"
+    ai_analysis: Optional[AtsAnalysisResult] = None
+    audit_report: Optional[TruthLockAuditReport] = None
+    provenance: Optional[ScanProvenanceMetadata] = None
+

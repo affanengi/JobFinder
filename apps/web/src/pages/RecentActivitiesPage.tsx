@@ -90,6 +90,7 @@ const TASK_OPTIONS = [
   { value: 'dual_artifact_gen', label: 'Dual Artifact Generation' },
   { value: 'ats_bullet_rewrite', label: 'ATS Bullet Rewrite' },
   { value: 'ats_bulk_rewrite', label: 'ATS Bulk Rewrite' },
+  { value: 'ats_scan_analysis', label: 'ATS Scan' },
   { value: 'qa_copilot', label: 'QA Copilot' },
   { value: 'resume_parsing', label: 'Resume Parsing' },
   { value: 'job_ingestion', label: 'Job Ingestion' },
@@ -748,12 +749,22 @@ export const RecentActivitiesPage: React.FC = () => {
                         {/* Operation ID (Correlated batch) */}
                         <td className="py-3 px-3 whitespace-nowrap">
                           {item.operationId ? (
-                            <span
-                              title={`Correlated 1-shot operation: ${item.operationId}`}
-                              className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-purple-500/10 text-purple-300 border border-purple-500/20"
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCopy(item.operationId!, `op_${item.executionId}`);
+                              }}
+                              title={`Click to copy Operation ID: ${item.operationId}`}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] bg-purple-500/10 text-purple-300 border border-purple-500/20 hover:bg-purple-500/20 transition-colors cursor-pointer"
                             >
-                              {item.operationId.slice(0, 14)}...
-                            </span>
+                              <span>{item.operationId.slice(0, 14)}...</span>
+                              {copiedId === `op_${item.executionId}` ? (
+                                <Check className="w-2.5 h-2.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-2.5 h-2.5 opacity-60 hover:opacity-100" />
+                              )}
+                            </button>
                           ) : (
                             <span className="text-[11px] text-primary-secondary/50">—</span>
                           )}
