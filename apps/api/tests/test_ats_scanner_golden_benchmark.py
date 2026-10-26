@@ -576,7 +576,7 @@ def test_golden_benchmark_50_pairs_evaluation():
     agreement_pct = (agreements / total_count) * 100.0
     fp_rate_pct = (false_positives / max(negative_count, 1)) * 100.0
 
-    print(f"\n================ ATS SCANNER GOLDEN BENCHMARK RESULTS ================")
+    print("\n================ ATS SCANNER GOLDEN BENCHMARK RESULTS ================")
     print(f"Total Evaluated Pairs: {total_count}")
     print(f"Negative / Mismatched Cases: {negative_count}")
     print(f"Rubric Agreements: {agreements}/{total_count} ({agreement_pct:.1f}%) [Target >= 90.0%]")
@@ -584,7 +584,7 @@ def test_golden_benchmark_50_pairs_evaluation():
     for r in results:
         if not r["agreed"]:
             print(f"  MISMATCH: {r['id']} score={r['score']} expected={r['expected_band']} measured={r['measured_band']}")
-    print(f"=======================================================================")
+    print("=======================================================================")
 
     # Acceptance Assertions
     assert agreement_pct >= 90.0, f"Rubric agreement {agreement_pct:.1f}% below 90% target"
