@@ -112,6 +112,7 @@ def test_oauth_crypto_fails_if_secret_missing(monkeypatch):
     """Verify that get_oauth_master_key_bytes fails if secret is missing."""
     monkeypatch.setenv("OAUTH_ENCRYPTION_SECRET", "")
     monkeypatch.setattr(settings, "OAUTH_ENCRYPTION_SECRET", "")
+    monkeypatch.setattr("dotenv.dotenv_values", lambda *args, **kwargs: {})
     with pytest.raises(OAuthCryptoKeyMissingError):
         get_oauth_master_key_bytes()
 
@@ -172,7 +173,7 @@ def test_oauth_status_endpoint_never_exposes_tokens():
         user_id=TEST_USER,
         access_token="secret-access-token-12345",
         refresh_token="secret-refresh-token-67890",
-        expiry="2026-10-27T00:00:00Z",
+        expiry="2099-01-01T00:00:00Z",
         gmail_address="candidate.alex@gmail.com",
     )
 
@@ -321,7 +322,7 @@ async def test_successful_send_transitions_to_sent():
         user_id=TEST_USER,
         access_token="valid-token",
         refresh_token="valid-refresh",
-        expiry="2026-10-27T12:00:00Z",
+        expiry="2099-01-01T00:00:00Z",
     )
 
     # Reset contact to verified
@@ -378,7 +379,7 @@ async def test_definite_rejection_transitions_to_send_failed():
         user_id=TEST_USER,
         access_token="valid-token",
         refresh_token="valid-refresh",
-        expiry="2026-10-27T12:00:00Z",
+        expiry="2099-01-01T00:00:00Z",
     )
 
     draft = OutreachMessage(
@@ -422,7 +423,7 @@ async def test_timeout_transitions_to_send_status_unknown_without_autoresend():
         user_id=TEST_USER,
         access_token="valid-token",
         refresh_token="valid-refresh",
-        expiry="2026-10-27T12:00:00Z",
+        expiry="2099-01-01T00:00:00Z",
     )
 
     draft = OutreachMessage(
@@ -470,6 +471,13 @@ async def test_timeout_transitions_to_send_status_unknown_without_autoresend():
 @pytest.mark.asyncio
 async def test_reconciliation_resolves_ambiguous_state():
     """Verify that reconciliation discovers correlation ID in sent mail and marks SENT."""
+    oauth_token_repo.save_tokens(
+        user_id=TEST_USER,
+        access_token="valid-token",
+        refresh_token="valid-refresh",
+        expiry="2099-01-01T00:00:00Z",
+    )
+
     mock_http = MagicMock()
     # 1. messages list returns message item
     mock_http.get = AsyncMock(
@@ -524,6 +532,13 @@ async def test_reconciliation_resolves_ambiguous_state():
 @pytest.mark.asyncio
 async def test_resume_attachment_ownership_and_validation():
     """Verify that user cannot attach a resume belonging to another user."""
+    oauth_token_repo.save_tokens(
+        user_id=TEST_USER,
+        access_token="valid-token",
+        refresh_token="valid-refresh",
+        expiry="2099-01-01T00:00:00Z",
+    )
+
     # Create resume owned by another user
     other_resume = TailoredResumeDTO(
         id="resume-other-user",
