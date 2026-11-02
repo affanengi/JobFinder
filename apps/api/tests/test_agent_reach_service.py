@@ -27,7 +27,9 @@ from app.services.agent_reach_service import (
 @pytest.fixture
 def agent_reach_service():
     """Service instance with mocked or real CLI path."""
-    return AgentReachService(cli_path="/mock/bin/agent-reach")
+    svc = AgentReachService(cli_path="/mock/bin/agent-reach")
+    with patch.object(svc, "_resolve_cli_path", return_value="/mock/bin/agent-reach"):
+        yield svc
 
 
 @pytest.mark.asyncio
