@@ -582,13 +582,19 @@ def test_stale_job_recovery():
 # -----------------------------------------------------------------------------
 def test_migration_script_safety_abort():
     """Verify deduplication migration script refuses execution unless BOTH --execute and --confirm are provided."""
+    import os
     import subprocess
     import sys
+    from pathlib import Path
+
+    api_root = Path(__file__).resolve().parent.parent
+    sub_env = {**os.environ, "PYTHONPATH": str(api_root)}
 
     # 1. Dry-run mode by default
     res_dry = subprocess.run(
         [sys.executable, "scripts/deduplicate_existing_contacts.py", "--dry-run"],
-        cwd="/home/mohdaffan/Desktop/jobFinder/apps/api",
+        cwd=str(api_root),
+        env=sub_env,
         capture_output=True,
         text=True,
     )
@@ -598,7 +604,8 @@ def test_migration_script_safety_abort():
     # 2. Execution attempted without --confirm -> MUST ABORT WITH EXIT CODE 1
     res_abort = subprocess.run(
         [sys.executable, "scripts/deduplicate_existing_contacts.py", "--execute"],
-        cwd="/home/mohdaffan/Desktop/jobFinder/apps/api",
+        cwd=str(api_root),
+        env=sub_env,
         capture_output=True,
         text=True,
     )
