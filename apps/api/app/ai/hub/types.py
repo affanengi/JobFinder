@@ -19,6 +19,11 @@ class AITaskType(StrEnum):
     JOB_INGESTION = "job_ingestion"
     JOB_ANALYSIS = "job_analysis"
     ATS_SCAN_ANALYSIS = "ats_scan_analysis"
+    COMPANY_INTELLIGENCE = "company_intelligence"
+    OUTREACH_DRAFT_GENERATION = "outreach_draft_generation"
+    REPLY_INTENT_CLASSIFICATION = "reply_intent_classification"
+
+
 
 
 class ProviderType(StrEnum):

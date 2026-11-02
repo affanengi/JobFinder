@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { createPortal } from 'react-dom';
-import { Trash2, X, Loader2 } from 'lucide-react';
+import { Trash2, X, Loader2, AlertCircle } from 'lucide-react';
 
 interface DeleteConfirmModalProps {
   isOpen: boolean;
@@ -9,6 +9,7 @@ interface DeleteConfirmModalProps {
   message?: string;
   itemName?: string;
   confirmLabel?: string;
+  errorMessage?: string | null;
   onConfirm: () => Promise<void> | void;
   onClose: () => void;
 }
@@ -19,6 +20,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
   message = 'Are you sure you want to delete this item? This action will permanently remove it from your verified records in Cloud Firestore.',
   itemName,
   confirmLabel = 'Delete',
+  errorMessage,
   onConfirm,
   onClose,
 }) => {
@@ -95,6 +97,12 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
           <p className="text-xs text-neutral-300 leading-relaxed">
             {message}
           </p>
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
+              <div className="leading-snug">{errorMessage}</div>
+            </div>
+          )}
         </div>
 
         {/* Footer Actions */}

@@ -95,6 +95,8 @@ const TASK_OPTIONS = [
   { value: 'resume_parsing', label: 'Resume Parsing' },
   { value: 'job_ingestion', label: 'Job Ingestion' },
   { value: 'job_analysis', label: 'Job Analysis' },
+  { value: 'company_intelligence', label: 'Company Intelligence' },
+  { value: 'bulk_company_research', label: 'Bulk Company Research' },
 ];
 
 const PROVIDER_OPTIONS = [

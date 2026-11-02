@@ -13,6 +13,7 @@ import {
   Plus,
   Minus,
   ShieldCheck,
+  Building2,
 } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 
@@ -43,7 +44,11 @@ const getFriendlyCredentialName = (cred: CredentialItem, index: number): string 
   return `Key ${index + 1}`
 }
 
-const getTaskRouteTarget = (routing: Record<string, string>, taskKey: string): string | undefined => {
+const getTaskRouteTarget = (
+  routing: Record<string, string>,
+  taskKey: string,
+  credentials?: CredentialItem[]
+): string | undefined => {
   if (!routing) return undefined
   if (routing[taskKey]) return routing[taskKey]
   if (taskKey === 'resume_generation' && routing['resume_tailoring']) return routing['resume_tailoring']
@@ -52,6 +57,22 @@ const getTaskRouteTarget = (routing: Record<string, string>, taskKey: string): s
   if (taskKey === 'cover_letter_gen' && routing['cover_letter_generation']) return routing['cover_letter_generation']
   if (taskKey === 'ats_scan_analysis' && (routing['ats_scanner'] || routing['ats_scan'])) return routing['ats_scanner'] || routing['ats_scan']
   if (taskKey === 'ats_bulk_rewrite' && routing['ats_bullet_rewrite']) return routing['ats_bullet_rewrite']
+  if (taskKey === 'company_intelligence' && (routing['company_analysis'] || routing['company_research'])) {
+    return routing['company_analysis'] || routing['company_research']
+  }
+  if (taskKey === 'company_analysis' && (routing['company_intelligence'] || routing['company_research'])) {
+    return routing['company_intelligence'] || routing['company_research']
+  }
+  // Auto-connect to credential matching task name if unrouted
+  if (credentials && (taskKey === 'company_intelligence' || taskKey === 'company_analysis')) {
+    const compCred = credentials.find(
+      (c) =>
+        c.friendlyName &&
+        (c.friendlyName.toLowerCase().includes('company analysis') ||
+         c.friendlyName.toLowerCase().includes('company intelligence'))
+    )
+    if (compCred) return getCredId(compCred)
+  }
   return undefined
 }
 
@@ -98,6 +119,13 @@ const TASK_DEFINITIONS: TaskDefinition[] = [
     badge: 'Deterministic',
     description: 'Generates grounded answers for application questions.',
     icon: Bot,
+  },
+  {
+    key: 'company_intelligence',
+    name: 'Company Analysis',
+    badge: 'Scam Shield',
+    description: 'Evaluates employer legitimacy, detects scam signals, and audits careers pages.',
+    icon: Building2,
   },
   {
     key: 'resume_parsing',
@@ -291,7 +319,7 @@ export const TaskRoutingMapEditor: React.FC<TaskRoutingMapEditorProps> = ({
     }> = []
 
     TASK_DEFINITIONS.forEach((task) => {
-      const targetId = getTaskRouteTarget(taskRouting, task.key)
+      const targetId = getTaskRouteTarget(taskRouting, task.key, credentials)
       if (!targetId || targetId.toLowerCase() === 'auto' || targetId.trim() === '') return
 
       // Check if target is a provider
@@ -698,11 +726,13 @@ export const TaskRoutingMapEditor: React.FC<TaskRoutingMapEditorProps> = ({
               <span className="text-[11px] uppercase font-bold text-primary-secondary tracking-wider">
                 JobFinder AI Tasks
               </span>
-              <span className="text-[10px] text-primary-secondary font-mono">6 tasks</span>
+              <span className="text-[10px] text-primary-secondary font-mono">
+                {TASK_DEFINITIONS.length} tasks
+              </span>
             </div>
 
             {TASK_DEFINITIONS.map((task) => {
-              const currentPref = getTaskRouteTarget(taskRouting, task.key)
+              const currentPref = getTaskRouteTarget(taskRouting, task.key, credentials)
               const isConnecting = activeConnectingTask === task.key || dragSourceTask === task.key
               const isRouteActive = currentPref && currentPref !== 'auto' && currentPref.trim() !== ''
               const Icon = task.icon
@@ -1048,7 +1078,7 @@ export const TaskRoutingMapEditor: React.FC<TaskRoutingMapEditorProps> = ({
       {viewingTaskKey && (() => {
         const task = TASK_DEFINITIONS.find((t) => t.key === viewingTaskKey)
         if (!task) return null
-        const currentPref = getTaskRouteTarget(taskRouting, task.key)
+        const currentPref = getTaskRouteTarget(taskRouting, task.key, credentials)
         const isRouteConfigured = Boolean(currentPref && currentPref !== 'auto' && currentPref.trim() !== '')
         const Icon = task.icon
 
@@ -1161,7 +1191,7 @@ export const TaskRoutingMapEditor: React.FC<TaskRoutingMapEditorProps> = ({
       {/* 2. PREFERRED ROUTE MODAL (CLICKING CONNECTION LINE) */}
       {selectedRouteTask && (() => {
         const task = TASK_DEFINITIONS.find((t) => t.key === selectedRouteTask)
-        const targetId = getTaskRouteTarget(taskRouting, selectedRouteTask)
+        const targetId = getTaskRouteTarget(taskRouting, selectedRouteTask, credentials)
         let targetTitle = 'Auto (Priority Chain)'
         let targetType = 'Auto Fallback'
         let providerName = 'All Configured'

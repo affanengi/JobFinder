@@ -33,7 +33,7 @@ const mockCredentials: CredentialItem[] = [
 ]
 
 describe('TaskRoutingMapEditor Component', () => {
-  it('renders all 6 JobFinder tasks on the left and 3 providers on the right', () => {
+  it('renders all 8 JobFinder tasks on the left and 3 providers on the right', () => {
     render(
       <TaskRoutingMapEditor
         taskRouting={{}}
@@ -50,6 +50,7 @@ describe('TaskRoutingMapEditor Component', () => {
     expect(screen.getByText('ATS Rewrite')).toBeDefined()
     expect(screen.getByText('ATS Scan')).toBeDefined()
     expect(screen.getByText('Q&A Co-pilot Answerer')).toBeDefined()
+    expect(screen.getByText('Company Analysis')).toBeDefined()
     expect(screen.getByText('Resume PDF Parser')).toBeDefined()
     expect(screen.getByText('Job Discovery & Ingestion')).toBeDefined()
 
@@ -478,6 +479,79 @@ describe('TaskRoutingMapEditor Component', () => {
 
     // Verify 4 active routes count
     expect(screen.getByText(/4 preferred routes/i)).toBeDefined()
+  })
+
+  it('renders Company Analysis node immediately below Q&A Co-pilot Answerer and before Resume PDF Parser', () => {
+    render(
+      <TaskRoutingMapEditor
+        taskRouting={{}}
+        credentials={mockCredentials}
+        costPolicy="FREE_ONLY"
+        onSaveRoute={vi.fn()}
+        onRemoveRoute={vi.fn()}
+      />
+    )
+
+    // Verify ordering in DOM
+    const taskNodes = screen.getAllByTestId(/^task-node-/)
+    const taskKeys = taskNodes.map((node) => node.getAttribute('data-testid')?.replace('task-node-', ''))
+
+    const qaIdx = taskKeys.indexOf('qa_copilot')
+    const companyIdx = taskKeys.indexOf('company_intelligence')
+    const resumeParseIdx = taskKeys.indexOf('resume_parsing')
+
+    expect(companyIdx).toBeGreaterThan(qaIdx)
+    expect(resumeParseIdx).toBeGreaterThan(companyIdx)
+    expect(companyIdx).toBe(qaIdx + 1)
+    expect(resumeParseIdx).toBe(companyIdx + 1)
+
+    // Verify badge and description
+    expect(screen.getByText('Scam Shield')).toBeDefined()
+    expect(
+      screen.getByText('Evaluates employer legitimacy, detects scam signals, and audits careers pages.')
+    ).toBeDefined()
+  })
+
+  it('connects Company Analysis to dedicated Gemini credential and saves route with company_intelligence key', async () => {
+    const handleSave = vi.fn()
+    const credWithCompany: CredentialItem[] = [
+      ...mockCredentials,
+      {
+        id: 'cred_gemini_company',
+        credentialId: 'cred_gemini_company',
+        provider: 'gemini',
+        friendlyName: 'Company Analysis',
+        maskedApiKey: 'AQ.Ab8...cmKQ',
+        costTier: 'FREE_TIER',
+        isActive: true,
+      },
+    ]
+
+    render(
+      <TaskRoutingMapEditor
+        taskRouting={{}}
+        credentials={credWithCompany}
+        costPolicy="FREE_ONLY"
+        onSaveRoute={handleSave}
+        onRemoveRoute={vi.fn()}
+      />
+    )
+
+    // Click handle on Company Analysis
+    const companyHandle = screen.getByTitle('Drag or click to route Company Analysis')
+    fireEvent.click(companyHandle)
+
+    // Click input handle on Company Analysis credential
+    const credHandle = screen.getByTitle('Route specifically to Company Analysis')
+    fireEvent.click(credHandle)
+
+    await waitFor(() => {
+      expect(handleSave).toHaveBeenCalledWith('company_intelligence', 'cred_gemini_company')
+    })
+
+    // Verify raw secret is NOT displayed, only masked key
+    expect(screen.getByText('AQ.Ab8...cmKQ')).toBeDefined()
+    expect(screen.queryByText('AQ.Ab8MockCompanyAnalysisKey1234567890cmKQ')).toBeNull()
   })
 })
 

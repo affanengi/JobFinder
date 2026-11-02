@@ -1,9 +1,10 @@
-"""Routing engine for AI/API Hub candidate selection and capability matching."""
-
+import logging
 from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger("jobFinder.ai.hub.router")
 
 from app.ai.adapters.base import BaseProviderAdapter
 from app.ai.hub.models import (
@@ -132,7 +133,35 @@ TASK_REQUIREMENTS_MAP: dict[AITaskType, TaskRequirements] = {
         minimum_context_window=16000,
         schema_required=True,
     ),
+    AITaskType.COMPANY_INTELLIGENCE: TaskRequirements(
+        task=AITaskType.COMPANY_INTELLIGENCE,
+        required_capabilities={
+            ModelCapability.STRUCTURED_OUTPUT,
+            ModelCapability.HIGH_REASONING,
+        },
+        minimum_context_window=16000,
+        schema_required=True,
+    ),
+    AITaskType.OUTREACH_DRAFT_GENERATION: TaskRequirements(
+        task=AITaskType.OUTREACH_DRAFT_GENERATION,
+        required_capabilities={
+            ModelCapability.STRUCTURED_OUTPUT,
+            ModelCapability.HIGH_REASONING,
+        },
+        minimum_context_window=16000,
+        schema_required=True,
+    ),
+    AITaskType.REPLY_INTENT_CLASSIFICATION: TaskRequirements(
+        task=AITaskType.REPLY_INTENT_CLASSIFICATION,
+        required_capabilities={
+            ModelCapability.STRUCTURED_OUTPUT,
+            ModelCapability.HIGH_REASONING,
+        },
+        minimum_context_window=8000,
+        schema_required=True,
+    ),
 }
+
 
 
 class AIRouter:
@@ -215,11 +244,28 @@ class AIRouter:
                         server_key = settings.RESUME_GEMINI_API_KEY or settings.GEMINI_API_KEY or None
                     elif task_key_norm == "qa_copilot":
                         server_key = settings.QA_COPILOT_GEMINI_API_KEY or settings.GEMINI_API_KEY or None
+                    elif task_key_norm in ("company_intelligence", "company_analysis"):
+                        server_key = (
+                            settings.GEMINI_COMPANY_ANALYSIS_API_KEY
+                            or settings.COMPANY_ANALYSIS_GEMINI_API_KEY
+                            or None
+                        )
+                        if not server_key:
+                            logger.warning(
+                                "[ROUTER] Dedicated GEMINI_COMPANY_ANALYSIS_API_KEY is not configured. "
+                                "Refusing silent fallback to primary GEMINI_API_KEY for task %s.",
+                                task_key_norm,
+                            )
+                            continue
                     else:
                         server_key = settings.GEMINI_API_KEY or None
                 elif provider_type == ProviderType.OPENROUTER:
+                    if task_key_norm in ("company_intelligence", "company_analysis"):
+                        continue
                     server_key = settings.OPENROUTER_API_KEY or None
                 elif provider_type == ProviderType.GROQ:
+                    if task_key_norm in ("company_intelligence", "company_analysis"):
+                        continue
                     server_key = settings.GROQ_API_KEY or None
 
                 cred_list = [

@@ -30,6 +30,7 @@ import {
   Cpu,
   Lock,
   Loader2,
+  ShieldCheck,
 } from 'lucide-react'
 import { MOCK_VERIFIED_PROFILE } from '../data/mockUserFacts'
 import { fetchWithAuth } from '../lib/api'
@@ -37,6 +38,7 @@ import { AutofillProfile, EducationEntry } from '../types/autofill'
 import { useAuth } from '../context/AuthContext'
 import { useSync } from '../context/SyncContext'
 import { AiApiHubSettings } from '../components/settings/AiApiHubSettings'
+import { ThirdPartyConnectionsSettings } from '../components/settings/ThirdPartyConnectionsSettings'
 import { AuthModal } from '../components/auth/AuthModal'
 
 interface AutofillFormData {
@@ -136,7 +138,7 @@ const PRONOUN_OPTIONS = [
 export function SettingsPage() {
   const { user } = useAuth()
   const { recordPersistenceSuccess, recordPersistenceFailure } = useSync()
-  const [activeTab, setActiveTab] = useState<'autofill' | 'integrations' | 'ai-hub'>('autofill')
+  const [activeTab, setActiveTab] = useState<'ai-hub' | 'connections' | 'autofill' | 'integrations'>('ai-hub')
   const [copiedToken, setCopiedToken] = useState(false)
   const [copiedUrl, setCopiedUrl] = useState(false)
   const [sessionToken, setSessionToken] = useState<string | null>(null)
@@ -146,7 +148,43 @@ export function SettingsPage() {
     title?: string
     subtitle?: string
   }>({ isOpen: false })
+  const [oauthBanner, setOauthBanner] = useState<{
+    type: 'success' | 'error'
+    text: string
+  } | null>(null)
   const apiUrl = 'http://localhost:8000'
+
+  // Parse hash parameters for OAuth callback redirects (e.g. #settings?tab=connections&service=gmail&status=success)
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, '')
+    const [, hashQuery] = hash.split('?')
+    const params = new URLSearchParams(hashQuery || window.location.search)
+
+    const requestedTab = params.get('tab')
+    if (requestedTab === 'connections') {
+      setActiveTab('connections')
+    }
+
+    const service = params.get('service')
+    const status = params.get('status')
+    const errorMsg = params.get('error') || params.get('error_message')
+
+    if (status === 'success' && service) {
+      setActiveTab('connections')
+      setOauthBanner({
+        type: 'success',
+        text: `Google ${service.toUpperCase()} successfully connected and authorized!`,
+      })
+      window.history.replaceState(null, '', '#settings')
+    } else if (status === 'error' || errorMsg) {
+      setActiveTab('connections')
+      setOauthBanner({
+        type: 'error',
+        text: `Google ${service || 'service'} connection failed: ${decodeURIComponent(errorMsg || 'Authorization denied')}`,
+      })
+      window.history.replaceState(null, '', '#settings')
+    }
+  }, [])
 
   // Autofill Profile State
   const [formData, setFormData] = useState<AutofillFormData>(INITIAL_FORM_DATA)
@@ -592,6 +630,33 @@ export function SettingsPage() {
 
   return (
     <div className={`space-y-6 ${activeTab === 'ai-hub' ? 'max-w-6xl' : 'max-w-4xl'} mx-auto p-6 md:p-8 animate-in fade-in duration-150`}>
+      {/* OAuth Callback Alert Banner */}
+      {oauthBanner && (
+        <div
+          role="alert"
+          className={`p-3.5 rounded-xl border flex items-center justify-between text-xs animate-in fade-in ${
+            oauthBanner.type === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {oauthBanner.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 shrink-0" />
+            )}
+            <span>{oauthBanner.text}</span>
+          </div>
+          <button
+            onClick={() => setOauthBanner(null)}
+            className="text-xs hover:underline opacity-80 cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="border-b border-border pb-4">
         <h1 className="text-xl font-bold text-white flex items-center gap-2">
@@ -599,33 +664,11 @@ export function SettingsPage() {
           Settings & Configuration
         </h1>
         <p className="text-xs text-primary-secondary mt-1">
-          Manage your browser autofill data, job discovery filters, and browser extension integrations.
+          Manage your AI models, third-party Google connections, autofill profile, and web discovery integrations.
         </p>
 
         {/* Tab Navigation */}
-        <div className="flex gap-2 mt-4">
-          <button
-            onClick={() => setActiveTab('autofill')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
-              activeTab === 'autofill'
-                ? 'bg-emerald-500 text-black shadow-sm shadow-emerald-500/20'
-                : 'bg-surface text-primary-secondary hover:text-white hover:bg-surface-subtle border border-border'
-            }`}
-          >
-            <Bot className="w-4 h-4" />
-            Autofill Configuration
-          </button>
-          <button
-            onClick={() => setActiveTab('integrations')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
-              activeTab === 'integrations'
-                ? 'bg-emerald-500 text-black shadow-sm shadow-emerald-500/20'
-                : 'bg-surface text-primary-secondary hover:text-white hover:bg-surface-subtle border border-border'
-            }`}
-          >
-            <Sliders className="w-4 h-4" />
-            Discovery & Integrations
-          </button>
+        <div className="flex flex-wrap gap-2 mt-4" role="tablist">
           <button
             onClick={() => setActiveTab('ai-hub')}
             className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
@@ -637,10 +680,48 @@ export function SettingsPage() {
             <Cpu className="w-4 h-4" />
             AI / API Hub
           </button>
+          <button
+            onClick={() => setActiveTab('connections')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'connections'
+                ? 'bg-emerald-500 text-black shadow-sm shadow-emerald-500/20'
+                : 'bg-surface text-primary-secondary hover:text-white hover:bg-surface-subtle border border-border'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            Third-Party Connections
+          </button>
+          <button
+            onClick={() => setActiveTab('autofill')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'autofill'
+                ? 'bg-emerald-500 text-black shadow-sm shadow-emerald-500/20'
+                : 'bg-surface text-primary-secondary hover:text-white hover:bg-surface-subtle border border-border'
+            }`}
+          >
+            <Bot className="w-4 h-4" />
+            Autofill Configuration
+          </button>
+          <button
+            onClick={() => setActiveTab('integrations')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'integrations'
+                ? 'bg-emerald-500 text-black shadow-sm shadow-emerald-500/20'
+                : 'bg-surface text-primary-secondary hover:text-white hover:bg-surface-subtle border border-border'
+            }`}
+          >
+            <Sliders className="w-4 h-4" />
+            Discovery & Integrations
+          </button>
         </div>
       </div>
 
-      {/* TAB 1: Autofill Configuration */}
+      {/* TAB 2: Third-Party Connections */}
+      {activeTab === 'connections' && (
+        <ThirdPartyConnectionsSettings />
+      )}
+
+      {/* TAB 3: Autofill Configuration */}
       {activeTab === 'autofill' && (
         <div className="space-y-6 animate-in fade-in duration-150">
           {/* Guest Sign-in Required Banner */}

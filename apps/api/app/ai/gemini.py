@@ -38,8 +38,14 @@ class GeminiProvider(AIProvider):
         max_retries_per_model: int = 1,
         base_delay_seconds: float = 0.5,
         user_id: str = "system_default",
+        fallback_to_default_key: bool = True,
     ):
-        self.api_key = api_key or settings.GEMINI_API_KEY
+        if api_key is not None:
+            self.api_key = api_key or None
+        elif fallback_to_default_key:
+            self.api_key = settings.GEMINI_API_KEY or None
+        else:
+            self.api_key = None
         self.user_id = user_id
         if model_chain:
             self.model_chain = model_chain
@@ -66,13 +72,14 @@ class GeminiProvider(AIProvider):
             api_key=self.api_key,
             client=self._client,
             embedding_model=self.embedding_model,
+            fallback_to_default_key=fallback_to_default_key,
         )
 
     def _get_client(self) -> genai.Client:
         """Get or initialize the Gemini client."""
         if not self.api_key:
             raise AIAuthenticationError(
-                "Gemini API key is not configured. Please set GEMINI_API_KEY in .env."
+                "Gemini API key is not configured. Please set GEMINI_API_KEY or dedicated task API key in .env."
             )
         if self._client is None:
             self._client = genai.Client(api_key=self.api_key)

@@ -3,8 +3,12 @@ from fastapi import APIRouter
 from app.api.v1.ai_settings import router as ai_settings_router
 from app.api.v1.application_qa import router as application_qa_router
 from app.api.v1.applications import router as applications_router
+from app.api.v1.companies import router as companies_router
+from app.api.v1.connections import router as connections_router
 from app.api.v1.cover_letters import router as cover_letters_router
+from app.api.v1.gmail_oauth import router as gmail_oauth_router
 from app.api.v1.jobs import router as jobs_router
+from app.api.v1.opportunities import router as opportunities_router
 from app.api.v1.profile import router as profile_router
 from app.api.v1.recommendations import router as recommendations_router
 from app.api.v1.resumes import router as resumes_router
@@ -26,6 +30,8 @@ async def health_check():
 # Mount Sub-Routers
 api_router.include_router(profile_router)
 api_router.include_router(jobs_router)
+api_router.include_router(companies_router)
+api_router.include_router(opportunities_router)
 api_router.include_router(recommendations_router)
 api_router.include_router(resumes_router)
 api_router.include_router(cover_letters_router)
@@ -33,3 +39,7 @@ api_router.include_router(scanner_router)
 api_router.include_router(applications_router, prefix="/applications", tags=["Applications"])
 api_router.include_router(application_qa_router)
 api_router.include_router(ai_settings_router)
+api_router.include_router(gmail_oauth_router)
+api_router.include_router(connections_router)
+
+

@@ -11,12 +11,16 @@ import { ScannerPage } from './pages/ScannerPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { RecentActivitiesPage } from './pages/RecentActivitiesPage';
+import { CompanyDirectoryPage } from './pages/CompanyDirectoryPage';
+import { CompanyProfilePage } from './pages/CompanyProfilePage';
+import { ContactOutreachPage } from './pages/ContactOutreachPage';
 import { ResumeStudioModal, TailoredResumeDTO } from './components/resume/ResumeStudioModal';
 import { fetchWithAuth } from './lib/api';
 
 const VALID_TABS = [
   'dashboard',
   'opportunities',
+  'companies',
   'profile',
   'resumes',
   'scanner',
@@ -28,11 +32,35 @@ const VALID_TABS = [
 type ValidTab = typeof VALID_TABS[number];
 const DEFAULT_TAB: ValidTab = 'opportunities';
 
+function parseCompaniesHash(hash: string): { companyKey: string | null; contactId: string | null; oppId: string | null } {
+  const clean = hash.replace(/^#/, '');
+  const [path, query] = clean.split('?');
+  const parts = path.split('/');
+  let companyKey: string | null = null;
+  let contactId: string | null = null;
+  let oppId: string | null = null;
+
+  if (parts[0] === 'companies' && parts[1]) {
+    companyKey = parts[1];
+    if (parts[2] === 'contacts' && parts[3]) {
+      contactId = parts[3];
+    }
+  }
+
+  if (query) {
+    const params = new URLSearchParams(query);
+    oppId = params.get('oppId');
+  }
+
+  return { companyKey, contactId, oppId };
+}
+
 function getInitialTab(): ValidTab {
   if (typeof window !== 'undefined') {
     const hash = window.location.hash.replace(/^#/, '').toLowerCase();
-    if (VALID_TABS.includes(hash as ValidTab)) {
-      return hash as ValidTab;
+    const primary = hash.split('?')[0].split('/')[0];
+    if (VALID_TABS.includes(primary as ValidTab)) {
+      return primary as ValidTab;
     }
     try {
       const stored = localStorage.getItem('jobfinder_active_tab');
@@ -50,8 +78,19 @@ export const AppContent: React.FC = () => {
   const [activeTab, setActiveTabState] = useState<string>(getInitialTab);
   const [recommendationsCount, setRecommendationsCount] = useState<number>(0);
 
+  // Companies & Contacts Sub-Navigation State
+  const initialCompanyNav = typeof window !== 'undefined' ? parseCompaniesHash(window.location.hash) : { companyKey: null, contactId: null, oppId: null };
+  const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(initialCompanyNav.companyKey);
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(initialCompanyNav.contactId);
+  const [selectedContactOppId, setSelectedContactOppId] = useState<string | null>(initialCompanyNav.oppId);
+
   const setActiveTab = (tab: string) => {
     setActiveTabState(tab);
+    if (tab !== 'companies') {
+      setSelectedCompanyKey(null);
+      setSelectedContactId(null);
+      setSelectedContactOppId(null);
+    }
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem('jobfinder_active_tab', tab);
@@ -62,29 +101,70 @@ export const AppContent: React.FC = () => {
     }
   };
 
+  const handleSelectCompany = (key: string) => {
+    setSelectedCompanyKey(key);
+    setSelectedContactId(null);
+    setSelectedContactOppId(null);
+    setActiveTabState('companies');
+    if (typeof window !== 'undefined') {
+      window.location.hash = `companies/${key}`;
+    }
+  };
+
+  const handleSelectContact = (contactId: string, oppId: string) => {
+    setSelectedContactId(contactId);
+    setSelectedContactOppId(oppId);
+    setActiveTabState('companies');
+    if (typeof window !== 'undefined' && selectedCompanyKey) {
+      window.location.hash = `companies/${selectedCompanyKey}/contacts/${contactId}?oppId=${oppId}`;
+    }
+  };
+
+  const handleBackToCompany = () => {
+    setSelectedContactId(null);
+    setSelectedContactOppId(null);
+    if (typeof window !== 'undefined' && selectedCompanyKey) {
+      window.location.hash = `companies/${selectedCompanyKey}`;
+    }
+  };
+
+  const handleBackToDirectory = () => {
+    setSelectedCompanyKey(null);
+    setSelectedContactId(null);
+    setSelectedContactOppId(null);
+    if (typeof window !== 'undefined') {
+      window.location.hash = 'companies';
+    }
+  };
+
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace(/^#/, '').toLowerCase();
-      if (VALID_TABS.includes(hash as ValidTab)) {
+      const hash = window.location.hash.replace(/^#/, '');
+      const primary = hash.split('?')[0].split('/')[0].toLowerCase();
+
+      if (VALID_TABS.includes(primary as ValidTab)) {
         setActiveTabState((current) => {
-          if (current !== hash) {
+          if (current !== primary) {
             try {
-              localStorage.setItem('jobfinder_active_tab', hash);
+              localStorage.setItem('jobfinder_active_tab', primary);
             } catch {}
-            return hash;
+            return primary;
           }
           return current;
         });
+
+        if (primary === 'companies') {
+          const nav = parseCompaniesHash(window.location.hash);
+          setSelectedCompanyKey(nav.companyKey);
+          setSelectedContactId(nav.contactId);
+          if (nav.oppId) setSelectedContactOppId(nav.oppId);
+        }
       }
     };
 
-    if (window.location.hash.replace(/^#/, '').toLowerCase() !== activeTab) {
-      window.location.hash = activeTab;
-    }
-
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [activeTab]);
+  }, []);
 
   useEffect(() => {
     fetchWithAuth('/api/v1/recommendations')
@@ -143,6 +223,14 @@ export const AppContent: React.FC = () => {
         return { title: 'Dashboard', subtitle: 'Daily job discovery & match intelligence' };
       case 'opportunities':
         return { title: 'Opportunities', subtitle: 'Ranked & scored match recommendations' };
+      case 'companies':
+        if (selectedContactId) {
+          return { title: 'Contact Outreach', subtitle: 'Personalized Truth-Lock email composition & response tracking' };
+        }
+        if (selectedCompanyKey) {
+          return { title: 'Company Profile', subtitle: 'Attributable overview, Scam Shield legitimacy assessment, and professional contacts' };
+        }
+        return { title: 'Companies & Contacts', subtitle: 'Browse hiring organizations, verify legitimacy, and connect with stakeholders' };
       case 'profile':
         return { title: 'Master Profile', subtitle: 'Sole canonical source of career facts, verified skills, and academic history' };
       case 'resumes':
@@ -171,6 +259,33 @@ export const AppContent: React.FC = () => {
         );
       case 'opportunities':
         return <OpportunitiesPage onCountChange={setRecommendationsCount} />;
+      case 'companies':
+        if (selectedCompanyKey && selectedContactId) {
+          return (
+            <ContactOutreachPage
+              companyKey={selectedCompanyKey}
+              contactId={selectedContactId}
+              opportunityId={selectedContactOppId || 'primary'}
+              onBackToCompany={handleBackToCompany}
+              onBackToDirectory={handleBackToDirectory}
+            />
+          );
+        }
+        if (selectedCompanyKey) {
+          return (
+            <CompanyProfilePage
+              companyKey={selectedCompanyKey}
+              onBackToDirectory={handleBackToDirectory}
+              onSelectContact={(cId, oppId) => handleSelectContact(cId, oppId)}
+            />
+          );
+        }
+        return (
+          <CompanyDirectoryPage
+            onSelectCompany={handleSelectCompany}
+            onNavigateToOpportunities={() => setActiveTab('opportunities')}
+          />
+        );
       case 'profile':
         return <ProfilePage />;
       case 'resumes':

@@ -22,7 +22,17 @@ TASK_KEY_CANONICAL_MAP: dict[str, str] = {
     "ats_scan_analysis": AITaskType.ATS_SCAN_ANALYSIS.value,
     "ats_scanner": AITaskType.ATS_SCAN_ANALYSIS.value,
     "ats_scan": AITaskType.ATS_SCAN_ANALYSIS.value,
+    "company_intelligence": AITaskType.COMPANY_INTELLIGENCE.value,
+    "company_analysis": AITaskType.COMPANY_INTELLIGENCE.value,
+    "company_research": AITaskType.COMPANY_INTELLIGENCE.value,
+    "outreach_draft_generation": AITaskType.OUTREACH_DRAFT_GENERATION.value,
+    "outreach_generation": AITaskType.OUTREACH_DRAFT_GENERATION.value,
+    "outreach_draft": AITaskType.OUTREACH_DRAFT_GENERATION.value,
+    "reply_intent_classification": AITaskType.REPLY_INTENT_CLASSIFICATION.value,
+    "reply_classification": AITaskType.REPLY_INTENT_CLASSIFICATION.value,
+    "reply_intent": AITaskType.REPLY_INTENT_CLASSIFICATION.value,
 }
+
 
 
 def normalize_task_key(task: str | AITaskType | None) -> str:

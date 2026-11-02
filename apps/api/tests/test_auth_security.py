@@ -48,6 +48,7 @@ async def test_unauthenticated_requests_return_401():
             ("POST", "/api/v1/artifacts/generate", {"jobId": "test_job"}),
             ("POST", "/api/v1/scanner/scan-tailored", {"resume_id": "res_123"}),
             ("GET", "/api/v1/scanner/reports"),
+            ("POST", "/api/v1/companies/bulk-research", {"companyKeys": ["canonical"]}),
         ]
 
         for item in endpoints:

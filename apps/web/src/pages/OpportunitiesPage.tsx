@@ -20,6 +20,7 @@ import {
   LayoutGrid,
   List,
   Calendar,
+  ShieldAlert,
 } from 'lucide-react';
 import { AddJobModal, CanonicalJobDTO } from '../components/recommendations/AddJobModal';
 import { ThemeDropdown } from '../components/common/ThemeDropdown';
@@ -116,6 +117,7 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
   // Details Modal & Company Ribbon filter state
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
   const [selectedDetailsJob, setSelectedDetailsJob] = useState<ScoredOpportunityDTO | null>(null);
+  const [detailsInitialTab, setDetailsInitialTab] = useState<'overview' | 'requirements' | 'legitimacy'>('overview');
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -693,6 +695,19 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        setDetailsInitialTab('legitimacy');
+                        setSelectedDetailsJob(job);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-medium text-xs transition-colors cursor-pointer shadow-sm"
+                      title="Verify Company Legitimacy & Scam Shield"
+                    >
+                      <ShieldAlert className="w-3 h-3 text-indigo-400" />
+                      <span>Scam Shield</span>
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
                         handleOpenResumeStudio(job);
                       }}
                       className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 font-semibold text-xs transition-colors cursor-pointer shadow-sm"
@@ -868,6 +883,19 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      setDetailsInitialTab('legitimacy');
+                      setSelectedDetailsJob(job);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 font-medium text-xs transition-colors cursor-pointer"
+                    title="Verify Company Legitimacy & Scam Shield"
+                  >
+                    <ShieldAlert className="w-3 h-3 text-indigo-400" />
+                    <span className="hidden sm:inline">Scam Shield</span>
+                  </button>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
                       handleOpenResumeStudio(job);
                     }}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 font-semibold text-xs transition-colors cursor-pointer"
@@ -925,7 +953,11 @@ export const OpportunitiesPage: React.FC<OpportunitiesPageProps> = ({ onCountCha
       <OpportunityDetailsModal
         isOpen={selectedDetailsJob !== null}
         job={selectedDetailsJob}
-        onClose={() => setSelectedDetailsJob(null)}
+        initialTab={detailsInitialTab}
+        onClose={() => {
+          setSelectedDetailsJob(null);
+          setDetailsInitialTab('overview');
+        }}
         onTailorResume={(job) => {
           setSelectedDetailsJob(null);
           handleOpenResumeStudio(job);

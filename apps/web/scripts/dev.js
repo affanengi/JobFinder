@@ -27,7 +27,7 @@ function isPortInUse(port) {
   });
 }
 
-function checkBackendRunning(timeoutMs = 5000) {
+function checkBackendRunning(timeoutMs = 10000) {
   return new Promise((resolve) => {
     let resolved = false;
     const done = (val) => {
@@ -92,8 +92,8 @@ async function stopOurBackendProcess() {
     }
   } catch {}
 
-  // Wait up to 3s for graceful exit
-  for (let i = 0; i < 15; i++) {
+  // Wait up to 6s for graceful exit
+  for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 200));
     if (!isOurProcessAlive(backendProc)) {
       backendProc = null;
@@ -145,7 +145,7 @@ async function ensureBackendPortAvailable() {
   const inUse = await isPortInUse(8000);
   if (!inUse) return true;
 
-  const isHealthy = await checkBackendRunning(3000);
+  const isHealthy = await checkBackendRunning(8000);
   if (isHealthy) return true; // Healthy instance already running
 
   // If port 8000 is occupied by an unresponsive process, check if it's OUR child process
@@ -303,7 +303,7 @@ async function main() {
 
     isCheckingHealth = true;
     try {
-      const healthy = await checkBackendRunning(5000);
+      const healthy = await checkBackendRunning(10000);
       if (healthy) {
         if (consecutiveFailures > 0) {
           console.log('\x1b[32m%s\x1b[0m', '✓ Backend health restored; resetting failure counter.');

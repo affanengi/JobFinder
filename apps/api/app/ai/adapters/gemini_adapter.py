@@ -54,8 +54,14 @@ class GeminiAdapter(BaseProviderAdapter):
         api_key: str | None = None,
         client: genai.Client | None = None,
         embedding_model: str | None = None,
+        fallback_to_default_key: bool = True,
     ):
-        self.api_key = api_key or settings.GEMINI_API_KEY
+        if api_key is not None:
+            self.api_key = api_key or None
+        elif fallback_to_default_key:
+            self.api_key = settings.GEMINI_API_KEY or None
+        else:
+            self.api_key = None
         self.embedding_model = embedding_model or DEFAULT_EMBEDDING_MODEL
         self._client = client
         if self._client is None and self.api_key:

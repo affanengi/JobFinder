@@ -122,6 +122,8 @@ class JobService:
 
         ingested: list[CanonicalJob] = []
         for raw in raw_jobs:
+            if target and target.name:
+                raw.companyName = target.name
             canonical = self.normalizer.normalize(raw)
             self.save_job(canonical)
             ingested.append(canonical)

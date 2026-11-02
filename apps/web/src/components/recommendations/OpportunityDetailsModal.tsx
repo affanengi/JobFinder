@@ -13,18 +13,22 @@ import {
   Clock, 
   DollarSign, 
   ShieldCheck, 
+  ShieldAlert,
   Briefcase,
   Layers,
   FileCheck,
   Loader2,
   Info,
-  Check
+  Check,
+  Users
 } from 'lucide-react';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { CompanyLogo, getCanonicalCompanyInfo } from './CompanyFilterRibbon';
 import { StructuredJobDescription, JobDescriptionBlock } from './StructuredJobDescription';
 import { fetchWithAuth } from '../../lib/api';
 import { ProfileJobMatchResult, ApplicationProfileSnapshot } from '../../types/jobAnalysis';
+import { CompanyLegitimacyView } from '../intelligence/CompanyLegitimacyView';
+import { StakeholderDirectory } from '../contacts/StakeholderDirectory';
 
 export interface OpportunityDetailsDTO {
   id: string;
@@ -58,6 +62,7 @@ interface OpportunityDetailsModalProps {
   onClose: () => void;
   onTailorResume: (job: OpportunityDetailsDTO) => void;
   onToggleSave: (job: OpportunityDetailsDTO) => void;
+  initialTab?: 'overview' | 'requirements' | 'legitimacy' | 'contacts';
 }
 
 function isValidExternalUrl(url?: string | null): boolean {
@@ -76,10 +81,11 @@ export const OpportunityDetailsModal: React.FC<OpportunityDetailsModalProps> = (
   onClose,
   onTailorResume,
   onToggleSave,
+  initialTab = 'overview',
 }) => {
   useScrollLock(isOpen);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'requirements'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'requirements' | 'legitimacy' | 'contacts'>(initialTab);
   const [matchData, setMatchData] = useState<ProfileJobMatchResult | null>(null);
   const [isLoadingMatch, setIsLoadingMatch] = useState<boolean>(false);
   const [snapshotResult, setSnapshotResult] = useState<ApplicationProfileSnapshot | null>(null);
@@ -95,12 +101,12 @@ export const OpportunityDetailsModal: React.FC<OpportunityDetailsModalProps> = (
     }
   }, [isOpen, onClose]);
 
-  // Reset tab on job change
+  // Reset tab on job change or initialTab change
   useEffect(() => {
-    setActiveTab('overview');
+    setActiveTab(initialTab || 'overview');
     setMatchData(null);
     setSnapshotResult(null);
-  }, [job?.id]);
+  }, [job?.id, initialTab]);
 
   if (!isOpen || !job) return null;
 
@@ -286,6 +292,28 @@ export const OpportunityDetailsModal: React.FC<OpportunityDetailsModalProps> = (
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setActiveTab('legitimacy')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
+                activeTab === 'legitimacy'
+                  ? 'bg-white/15 text-white font-semibold'
+                  : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Legitimacy & Scam Shield</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('contacts')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
+                activeTab === 'contacts'
+                  ? 'bg-white/15 text-white font-semibold'
+                  : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 text-purple-400" />
+              <span>Hiring Team & Contacts</span>
+            </button>
           </div>
 
           {activeTab === 'requirements' && (
@@ -386,7 +414,7 @@ export const OpportunityDetailsModal: React.FC<OpportunityDetailsModalProps> = (
                 </div>
               </div>
             </>
-          ) : (
+          ) : activeTab === 'requirements' ? (
             /* Requirements & Evidence Tab */
             <div className="space-y-5">
               {isLoadingMatch && (
@@ -529,6 +557,18 @@ export const OpportunityDetailsModal: React.FC<OpportunityDetailsModalProps> = (
                 </div>
               )}
             </div>
+          ) : activeTab === 'legitimacy' ? (
+            <CompanyLegitimacyView
+              opportunityId={job.id}
+              companyName={job.company}
+              opportunityUrl={job.sourceUrl}
+            />
+          ) : (
+            <StakeholderDirectory
+              opportunityId={job.id}
+              companyName={job.company}
+              careersUrl={job.sourceUrl}
+            />
           )}
         </div>
 

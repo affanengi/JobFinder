@@ -6,9 +6,10 @@ import {
   Settings, 
   LayoutDashboard,
   ShieldCheck,
-  UserCheck,
+  Building2,
   Gauge,
   Activity,
+  UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -28,6 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'opportunities', label: 'Opportunities', icon: Sparkles, badge: recommendationsCount },
+    { id: 'companies', label: 'Companies & Contacts', icon: Building2 },
     { id: 'profile', label: 'Master Profile & Truth', icon: ShieldCheck },
     { id: 'resumes', label: 'Resumes & Tailoring', icon: FileText },
     { id: 'scanner', label: 'ATS Scanner', icon: Gauge },

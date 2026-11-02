@@ -505,16 +505,24 @@ class JobNormalizationService:
         relative_posted = self.format_relative_time(raw_payload.rawPostedAt)
 
         canonical_url = self.canonicalize_url(raw_payload.url)
+        from app.services.company_identity_service import normalize_company
+        canon_key, canon_name, _ = normalize_company(raw_payload.companyName, url=canonical_url)
+        resolved_company = canon_name if raw_payload.sourceType in ("greenhouse", "ashby", "lever") else raw_payload.companyName
+
         canonical_hash = self.compute_canonical_hash(
-            raw_payload.companyName, cleaned_title, raw_payload.rawLocation
+            resolved_company, cleaned_title, raw_payload.rawLocation
         )
         job_id = f"job-{uuid.uuid5(uuid.NAMESPACE_URL, canonical_url).hex[:10]}"
+
+        source_ref = raw_payload.to_source_ref()
+        if canon_key and canon_key != "unknown":
+            source_ref.companySlug = canon_key
 
         return CanonicalJob(
             id=job_id,
             canonicalHash=canonical_hash,
             title=cleaned_title,
-            company=raw_payload.companyName,
+            company=resolved_company,
             location=raw_payload.rawLocation
             or ("Remote" if work_mode == "remote" else "India / Global"),
             workMode=work_mode,
@@ -530,7 +538,7 @@ class JobNormalizationService:
             descriptionBlocks=description_blocks,
             requiredSkills=skills,
             department=raw_payload.rawDepartment,
-            sourceRef=raw_payload.to_source_ref(),
+            sourceRef=source_ref,
         )
 
 
