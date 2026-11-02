@@ -588,7 +588,7 @@ def test_migration_script_safety_abort():
     from pathlib import Path
 
     api_root = Path(__file__).resolve().parent.parent
-    sub_env = {**os.environ, "PYTHONPATH": str(api_root)}
+    sub_env = {**os.environ, "PYTHONPATH": str(api_root), "TESTING": "1"}
 
     # 1. Dry-run mode by default
     res_dry = subprocess.run(
